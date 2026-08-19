@@ -1,6 +1,6 @@
 all:
 	dotnet build
-	./albarakagame.app/bin/Debug/net10.0/albarakagame.app
+	dotnet run
 build:
 	dotnet build
 	./albarakagame.app/bin/Debug/net10.0/albarakagame.app
