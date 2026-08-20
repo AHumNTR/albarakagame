@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -10,6 +11,16 @@ builder.WebHost.ConfigureKestrel(options =>
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite("Data Source=app.db"));
+builder.Services.AddHttpClient("IterationClient",client=>{
+
+    client.BaseAddress = new Uri("https://dev.azure.com/albarakatech/");
+    client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+    string token =  "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
+    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    
+}
+);
+
 
 var app = builder.Build();
 
@@ -22,21 +33,25 @@ using (var scope = app.Services.CreateScope())
 }
 
 
-
-app.MapPost("/", async (JsonNode payload,AppDbContext db) =>
+app.MapPost("/", async (JsonNode payload,AppDbContext db,IHttpClientFactory httpFactory) =>
 {
         Console.WriteLine("Request Arrived");
 //get user
-        var rawUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
-        if(rawUser==null) return null;
-        var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == rawUser);
+        var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
+        var assignedUser = payload?["resource"]?["revision"]?["fields"]?["System.AssignedTo"]?.ToString();
+        if(editorUser==null||assignedUser==null) return null;
+        var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == editorUser);
         if (user == null)
         {
-            user = new User { UserName = rawUser, Points = 0 };
+            user = new User { UserName = editorUser, Points = 0 };
             db.Users.Add(user);
         }
         
-
+        var client=httpFactory.CreateClient("IterationClient");
+        string targetURI="MyFirstProject/MyFirstProject%20Team/_apis/work/teamsettings/iterations?$timeframe=current&api-version=7.1-preview";
+        var currentIterationPath=await client.GetAsync(targetURI);
+        var iterationResponse=((await currentIterationPath.Content.ReadFromJsonAsync<JsonNode>())?["value"]?[0]?["path"]?.ToString());
+        Console.WriteLine(iterationResponse);
         var todayUtc=DateTime.Today;
         
         int? workItemId = payload?["resource"]?["workItemId"]?.GetValue<int>();
@@ -45,39 +60,48 @@ app.MapPost("/", async (JsonNode payload,AppDbContext db) =>
 		var remainingWork = payload?["resource"]?["fields"]?["Microsoft.VSTS.Scheduling.RemainingWork"];
 
         //might not need to be double
-        int completedWorkNewValue=-1,completedOldValue=-1,remainingWorkNewValue=-1,remainingWorkOldValue=-1,pointsEarned=0;
+        int completedWorkNewValue=-1,completedWorkOldValue=-1,remainingWorkNewValue=-1,remainingWorkOldValue=-1;
 
 		if (completedWork !=null)
 		{
             completedWorkNewValue = (int) (completedWork["newValue"]?.GetValue<double>() ?? -1);
-            completedOldValue = (int)(completedWork["oldValue"]?.GetValue<double>() ?? -1);
-            pointsEarned += completedWorkNewValue - completedOldValue;
+            completedWorkOldValue = (int)(completedWork["oldValue"]?.GetValue<double>() ?? -1);
 		}
         if(remainingWork!=null){
             remainingWorkNewValue = (int)(remainingWork["newValue"]?.GetValue<double>() ?? -1);
             remainingWorkOldValue= (int)(remainingWork["oldValue"]?.GetValue<double>() ?? -1);
-            pointsEarned -= remainingWorkNewValue - remainingWorkOldValue;
         }
-        int pointsEarnedToday = await db.Transactions
-            .Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc)
-            .SumAsync(t => t.PointsEarned);
 
+
+        var todayTransactions = db.Transactions
+            .Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc);
+
+        int completedPointsToday = await todayTransactions
+            .SumAsync(t => t.PointsEarnedCompleted);
+
+        int remainingPointsToday = await todayTransactions
+            .SumAsync(t => t.PointsEarnedRemaining);
 
         //check which is smaller budget remaining for today or the pointsEarned this transaction
-        int pointsToGiveAfterLimit= Math.Min(8-pointsEarnedToday,pointsEarned);//upper limit
-        //same thing but for penalties use the upper bound variable pointsToGiveAfterLimit instead of pointsEarned
-        pointsToGiveAfterLimit= Math.Max(-8-pointsEarnedToday,pointsToGiveAfterLimit);//lower limit
-        user.Points += pointsToGiveAfterLimit;
+        int pointsToGiveAfterLimitCompleted=0,pointsToGiveAfterLimitRemaining=0;
+        if(assignedUser==editorUser)
+        {
+            //only give points if the assigned user is editing it
+            pointsToGiveAfterLimitCompleted=Math.Clamp(completedWorkNewValue-completedWorkOldValue,-8-completedPointsToday,8-completedPointsToday);
+            pointsToGiveAfterLimitRemaining=Math.Clamp(remainingWorkNewValue-remainingWorkOldValue,-8-remainingPointsToday,8-remainingPointsToday);
+        }
+        user.Points += pointsToGiveAfterLimitCompleted+pointsToGiveAfterLimitRemaining;
 
 
         var transaction = new PointTransaction
         {
             User=user,
             UserId = user.Id,
-            UserName=rawUser,
-            PointsEarned = pointsToGiveAfterLimit,
+            UserName=editorUser,
+            PointsEarnedCompleted = pointsToGiveAfterLimitCompleted,
+            PointsEarnedRemaining=pointsToGiveAfterLimitRemaining,
             CompletedNewValue=completedWorkNewValue,
-            CompletedOldValue=completedOldValue,
+            CompletedOldValue=completedWorkOldValue,
             RemainingNewValue=remainingWorkNewValue,
             RemainingOldValue=remainingWorkOldValue,
             WorkItemId = workItemId,
@@ -118,7 +142,8 @@ public class PointTransaction
     public int UserId { get; set; }
     public User? User { get; set; }
     public string? UserName {get; set;}
-    public int PointsEarned { get; set; }
+    public int PointsEarnedCompleted { get; set; }
+    public int PointsEarnedRemaining { get; set; }
     public int CompletedOldValue { get; set; }
     public int CompletedNewValue { get; set; }
     public int RemainingOldValue { get; set; }
