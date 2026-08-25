@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("albarakagame")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+24e752c562e57ad05b40b7b6f279cf8ab8cd8d9d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d5c92e3cd3bf34710ebe7f40eeb0c6efa8e01193")]
 [assembly: System.Reflection.AssemblyProductAttribute("albarakagame")]
 [assembly: System.Reflection.AssemblyTitleAttribute("albarakagame")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -35,11 +35,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 
-app.MapPost("/", async (JsonNode payload,AppDbContext db,IHttpClientFactory httpFactory) =>
+
+app.MapPost("/completedworkchanged", async (JsonNode payload,AppDbContext db) =>
 {
-//maybe shoul split completed and remaining work value change request 
-        //Console.WriteLine(payload.ToString());
-//get user
+        Console.WriteLine(payload.ToString());
         var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
         var assignedUser = payload?["resource"]?["revision"]?["fields"]?["System.AssignedTo"]?.ToString();
         if(editorUser==null||assignedUser==null) return null;
@@ -55,55 +54,94 @@ app.MapPost("/", async (JsonNode payload,AppDbContext db,IHttpClientFactory http
         int? workItemId = payload?["resource"]?["workItemId"]?.GetValue<int>();
         //get work times
 		var completedWork = payload?["resource"]?["fields"]?["Microsoft.VSTS.Scheduling.CompletedWork"];
-		var remainingWork = payload?["resource"]?["fields"]?["Microsoft.VSTS.Scheduling.RemainingWork"];
         var iterationPath = payload?["resource"]?["revision"]?["fields"]?["System.IterationPath"];
 
-        int completedWorkNewValue=-1,completedWorkOldValue=-1,remainingWorkNewValue=-1,remainingWorkOldValue=-1;
+        int completedWorkNewValue=-1,completedWorkOldValue=-1;
 
-		if (completedWork !=null)
-		{
-            completedWorkNewValue = (int) (completedWork["newValue"]?.GetValue<double>() ?? 0);
-            completedWorkOldValue = (int)(completedWork["oldValue"]?.GetValue<double>() ?? 0);
-		}
-        if(remainingWork!=null){
-            remainingWorkNewValue = (int)(remainingWork["newValue"]?.GetValue<double>() ?? 0);
-            remainingWorkOldValue= (int)(remainingWork["oldValue"]?.GetValue<double>() ?? 0);
+        if(completedWork!=null){
+            completedWorkNewValue = (int)(completedWork["newValue"]?.GetValue<double>() ?? 0);
+            completedWorkOldValue= (int)(completedWork["oldValue"]?.GetValue<double>() ?? 0);
         }
 
 
-        var todayTransactions = db.Transactions
-            .Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc);
-
-        int completedPointsToday = await todayTransactions.Where(t=>t.Type=="Completed Work")
+        int completedPointsToday = await db.Transactions.Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc).Where(t=>t.Type=="Completed Work Updated")
             .SumAsync(t => t.DeltaPoints);
 
-        int remainingPointsToday = await todayTransactions
-            .SumAsync(t => t.PointsEarnedRemaining);
-
         //check which is smaller budget remaining for today or the pointsEarned this transaction
-        int pointsToGiveAfterLimitCompleted=0,pointsToGiveAfterLimitRemaining=0;
+        int pointsToGiveAfterLimitCompleted=0;
         if(assignedUser==editorUser&&IterationSyncBackgroundService.CurrentIterationPath==iterationPath?.ToString())
-        {
-            //only give points if the assigned user is editing it
             pointsToGiveAfterLimitCompleted=Math.Clamp(completedWorkNewValue-completedWorkOldValue,-8-completedPointsToday,8-completedPointsToday);
-            pointsToGiveAfterLimitRemaining=Math.Clamp(remainingWorkNewValue-remainingWorkOldValue,-8-remainingPointsToday,8-remainingPointsToday);
-        }
-        user.Points += pointsToGiveAfterLimitCompleted+pointsToGiveAfterLimitRemaining;
+
+        user.Points += pointsToGiveAfterLimitCompleted;
 
 
         var transaction = new PointTransaction
         {
             User=user,
             UserId = user.Id,
-            DeltaPoints = pointsToGiveAfterLimitCompleted+pointsToGiveAfterLimitRemaining,//shouldnt cause a issue in seperating them since they cant call at the same time
+            Type="Completed Work Updated",
+            DeltaPoints = pointsToGiveAfterLimitCompleted,//shouldnt cause a issue in seperating them since they cant call at the same time
             WorkItemId = workItemId,
-            Description= $"Completed(or remaining) work has been updated from {completedWorkOldValue} to {completedWorkNewValue} and after applying the limit {pointsToGiveAfterLimitCompleted} is rewarded/substracted",
+            Description= $"Completed work has been updated from {completedWorkOldValue} to {completedWorkNewValue} and after applying the limit {pointsToGiveAfterLimitCompleted} is rewarded/substracted",
             Timestamp = DateTime.UtcNow
         };
         db.Transactions.Add(transaction);
         await db.SaveChangesAsync();
-		return Results.Ok();});
 
+		return Results.Ok();});
+app.MapPost("/remainingworkchanged", async (JsonNode payload,AppDbContext db) =>
+{
+
+        var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
+        var assignedUser = payload?["resource"]?["revision"]?["fields"]?["System.AssignedTo"]?.ToString();
+        if(editorUser==null||assignedUser==null) return null;
+        var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == editorUser);
+        if (user == null)
+        {
+            user = new User { UserName = editorUser, Points = 0 };
+            db.Users.Add(user);
+        }
+        
+        var todayUtc=DateTime.Today;
+        
+        int? workItemId = payload?["resource"]?["workItemId"]?.GetValue<int>();
+        //get work times
+		var completedWork = payload?["resource"]?["fields"]?["Microsoft.VSTS.Scheduling.completedWork"];
+        var iterationPath = payload?["resource"]?["revision"]?["fields"]?["System.IterationPath"];
+
+        int remainingWorkNewValue=-1,remainingWorkOldValue=-1;
+
+        if(completedWork!=null){
+            remainingWorkNewValue = (int)(completedWork["newValue"]?.GetValue<double>() ?? 0);
+            remainingWorkOldValue= (int)(completedWork["oldValue"]?.GetValue<double>() ?? 0);
+        }
+
+
+        int remainingPointsToday = await db.Transactions.Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc).Where(t=>t.Type=="Remaining Work Updated")
+            .SumAsync(t => t.DeltaPoints);
+
+        //check which is smaller budget remaining for today or the pointsEarned this transaction
+        int pointsToGiveAfterLimitRemaining=0;
+        if(assignedUser==editorUser&&IterationSyncBackgroundService.CurrentIterationPath==iterationPath?.ToString())
+            pointsToGiveAfterLimitRemaining=Math.Clamp(remainingWorkNewValue-remainingWorkOldValue,-8-remainingPointsToday,8-remainingPointsToday);
+
+        user.Points += pointsToGiveAfterLimitRemaining;
+
+
+        var transaction = new PointTransaction
+        {
+            User=user,
+            UserId = user.Id,
+            Type="Remaining Work Updated",
+            DeltaPoints = pointsToGiveAfterLimitRemaining,//shouldnt cause a issue in seperating them since they cant call at the same time
+            WorkItemId = workItemId,
+            Description= $"Remaining work has been updated from {remainingWorkOldValue} to {remainingWorkNewValue} and after applying the limit {pointsToGiveAfterLimitRemaining} is rewarded/substracted",
+            Timestamp = DateTime.UtcNow
+        };
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync();
+
+		return Results.Ok();});
 app.MapPost("/iterationupdate", async (JsonNode payload,AppDbContext db) => 
 {
     var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
