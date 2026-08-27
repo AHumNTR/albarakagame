@@ -13,6 +13,9 @@
     <SourceRoot Include="/home/humn/.nuget/packages/" />
   </ItemGroup>
   <ImportGroup Condition=" '$(ExcludeRestorePackageImports)' != 'true' ">
+    <Import Project="$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.windows/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.Windows.props" Condition="Exists('$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.windows/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.Windows.props')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.linux/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.Linux.props" Condition="Exists('$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu.linux/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.Linux.props')" />
+    <Import Project="$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.props" Condition="Exists('$(NuGetPackageRoot)microsoft.ml.onnxruntime.gpu/1.29.0/buildTransitive/netstandard2.1/Microsoft.ML.OnnxRuntime.Gpu.props')" />
     <Import Project="$(NuGetPackageRoot)microsoft.entityframeworkcore/10.0.11/buildTransitive/net10.0/Microsoft.EntityFrameworkCore.props" Condition="Exists('$(NuGetPackageRoot)microsoft.entityframeworkcore/10.0.11/buildTransitive/net10.0/Microsoft.EntityFrameworkCore.props')" />
   </ImportGroup>
 </Project>

@@ -8,10 +8,20 @@
     ".NETCoreApp,Version=v10.0": {
       "albarakagame/1.0.0": {
         "dependencies": {
-          "Microsoft.EntityFrameworkCore.Sqlite": "10.0.11"
+          "Microsoft.EntityFrameworkCore.Sqlite": "10.0.11",
+          "Microsoft.ML.OnnxRuntime.Gpu": "1.29.0",
+          "Microsoft.ML.Tokenizers": "2.0.0"
         },
         "runtime": {
           "albarakagame.dll": {}
+        }
+      },
+      "Google.Protobuf/3.30.2": {
+        "runtime": {
+          "lib/net5.0/Google.Protobuf.dll": {
+            "assemblyVersion": "3.30.2.0",
+            "fileVersion": "3.30.2.0"
+          }
         }
       },
       "Microsoft.Data.Sqlite.Core/10.0.11": {
@@ -82,6 +92,109 @@
           "lib/net10.0/Microsoft.Extensions.DependencyModel.dll": {
             "assemblyVersion": "10.0.0.11",
             "fileVersion": "10.0.1126.37416"
+          }
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Gpu/1.29.0": {
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Gpu.Linux": "1.29.0",
+          "Microsoft.ML.OnnxRuntime.Gpu.Windows": "1.29.0",
+          "Microsoft.ML.OnnxRuntime.Managed": "1.29.0"
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Gpu.Linux/1.29.0": {
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.29.0"
+        },
+        "runtimeTargets": {
+          "runtimes/linux-x64/native/libonnxruntime.so": {
+            "rid": "linux-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/linux-x64/native/libonnxruntime_providers_cuda.so": {
+            "rid": "linux-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/linux-x64/native/libonnxruntime_providers_shared.so": {
+            "rid": "linux-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/linux-x64/native/libonnxruntime_providers_tensorrt.so": {
+            "rid": "linux-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Gpu.Windows/1.29.0": {
+        "dependencies": {
+          "Microsoft.ML.OnnxRuntime.Managed": "1.29.0"
+        },
+        "runtimeTargets": {
+          "runtimes/win-x64/native/onnxruntime.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime.lib": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_cuda.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_cuda.lib": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_shared.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_shared.lib": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_tensorrt.dll": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          },
+          "runtimes/win-x64/native/onnxruntime_providers_tensorrt.lib": {
+            "rid": "win-x64",
+            "assetType": "native",
+            "fileVersion": "0.0.0.0"
+          }
+        }
+      },
+      "Microsoft.ML.OnnxRuntime.Managed/1.29.0": {
+        "dependencies": {
+          "System.Numerics.Tensors": "9.0.0"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.ML.OnnxRuntime.dll": {
+            "assemblyVersion": "1.29.0.0",
+            "fileVersion": "1.29.0.0"
+          }
+        }
+      },
+      "Microsoft.ML.Tokenizers/2.0.0": {
+        "dependencies": {
+          "Google.Protobuf": "3.30.2"
+        },
+        "runtime": {
+          "lib/net8.0/Microsoft.ML.Tokenizers.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "2.0.25.55704"
           }
         }
       },
@@ -229,6 +342,14 @@
             "fileVersion": "2.1.12.3116"
           }
         }
+      },
+      "System.Numerics.Tensors/9.0.0": {
+        "runtime": {
+          "lib/net9.0/System.Numerics.Tensors.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.24.52809"
+          }
+        }
       }
     }
   },
@@ -237,6 +358,13 @@
       "type": "project",
       "serviceable": false,
       "sha512": ""
+    },
+    "Google.Protobuf/3.30.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-Y2aOVLIt75yeeEWigg9V9YnjsEm53sADtLGq0gLhwaXpk3iu8tYSoauolyhenagA2sWno2TQ2WujI0HQd6s1Vw==",
+      "path": "google.protobuf/3.30.2",
+      "hashPath": "google.protobuf.3.30.2.nupkg.sha512"
     },
     "Microsoft.Data.Sqlite.Core/10.0.11": {
       "type": "package",
@@ -287,6 +415,41 @@
       "path": "microsoft.extensions.dependencymodel/10.0.11",
       "hashPath": "microsoft.extensions.dependencymodel.10.0.11.nupkg.sha512"
     },
+    "Microsoft.ML.OnnxRuntime.Gpu/1.29.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-1oDKX7yWbXDMhQDUQp2RfDl9deS+TmASY5MLShXF4JvXc3RcEywkyMN2y3TJyYIuxtd6uXnI52RcRaCS7piG9g==",
+      "path": "microsoft.ml.onnxruntime.gpu/1.29.0",
+      "hashPath": "microsoft.ml.onnxruntime.gpu.1.29.0.nupkg.sha512"
+    },
+    "Microsoft.ML.OnnxRuntime.Gpu.Linux/1.29.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-D4i3HQ9euhXjAQqweUzcET2yFZv7f5Vh/nNLAAcM7Z1qLULeyAWOJuX82QCACZ9jogaj2d2AR29KFzbteYv5mQ==",
+      "path": "microsoft.ml.onnxruntime.gpu.linux/1.29.0",
+      "hashPath": "microsoft.ml.onnxruntime.gpu.linux.1.29.0.nupkg.sha512"
+    },
+    "Microsoft.ML.OnnxRuntime.Gpu.Windows/1.29.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-ZdF1BDQcdfR3znD/VylKcGw1BxIapYIq1kTmzvyZtLCw2wNBPjeTIzrxH5uOoR6iJE1zCJzKyw/ETMLqQXqcFw==",
+      "path": "microsoft.ml.onnxruntime.gpu.windows/1.29.0",
+      "hashPath": "microsoft.ml.onnxruntime.gpu.windows.1.29.0.nupkg.sha512"
+    },
+    "Microsoft.ML.OnnxRuntime.Managed/1.29.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-jLy5PtzvRQCBFOczzfRY7zpuMVUyLwjO0Jsdd8MBZdmnPIqx5vW9cYDNyCqkrYpwkof8GlqBVaEUMWrMWRtvuw==",
+      "path": "microsoft.ml.onnxruntime.managed/1.29.0",
+      "hashPath": "microsoft.ml.onnxruntime.managed.1.29.0.nupkg.sha512"
+    },
+    "Microsoft.ML.Tokenizers/2.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-+b8lT4cLLO/sBR2hjvE/qG6qrZG15h7/PBvnIrzTh4xDaAxdHUY6449rC+1pHzQUsBiCHZVbj+VMn+xS0sL7TA==",
+      "path": "microsoft.ml.tokenizers/2.0.0",
+      "hashPath": "microsoft.ml.tokenizers.2.0.0.nupkg.sha512"
+    },
     "SQLitePCLRaw.bundle_e_sqlite3/2.1.12": {
       "type": "package",
       "serviceable": true,
@@ -314,6 +477,13 @@
       "sha512": "sha512-W3oH4XIfCzFrgUSDKHhN6N+dgzA5YHOR2VxX8GB6Qy7CyrJJgxPEG8NirgYWlPQC5P2jz2knSsexWu4tDUL33g==",
       "path": "sqlitepclraw.provider.e_sqlite3/2.1.12",
       "hashPath": "sqlitepclraw.provider.e_sqlite3.2.1.12.nupkg.sha512"
+    },
+    "System.Numerics.Tensors/9.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-hyJB4UlpAi19Xr9AXzu2NuagKC4lPfHObNMEAA0HmqFz2rX7wKgzeYzO/jM/eBHDhnUGFFEjk5cOoJaxqg5J4A==",
+      "path": "system.numerics.tensors/9.0.0",
+      "hashPath": "system.numerics.tensors.9.0.0.nupkg.sha512"
     }
   }
 }

@@ -47,6 +47,14 @@
             "Microsoft.EntityFrameworkCore.Sqlite": {
               "target": "Package",
               "version": "[10.0.11, )"
+            },
+            "Microsoft.ML.OnnxRuntime.Gpu": {
+              "target": "Package",
+              "version": "[1.29.0, )"
+            },
+            "Microsoft.ML.Tokenizers": {
+              "target": "Package",
+              "version": "[2.0.0, )"
             }
           },
           "imports": [
