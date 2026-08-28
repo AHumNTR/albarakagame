@@ -18,46 +18,29 @@ public class ZeroShotCommentClassifier : IDisposable
 		//not vocab path/stream anymore 
 		using var vocabStream = File.OpenRead(vocabPath);
 		if(vocabPath.Split('.')[1]=="model")
-		_tokenizer =SentencePieceTokenizer.Create(vocabStream);
+			_tokenizer =SentencePieceTokenizer.Create(vocabStream);
 		else _tokenizer=BertTokenizer.Create(vocabStream);
 	}
 
-	public (bool IsMeaningful, float Score) Evaluate(string comment, string? workItemTitle, float passThreshold = 0.55f)
+	public  double  Evaluate(string comment, string? workItemTitle,double baseline,double temperature)
 	{
 		if (string.IsNullOrWhiteSpace(comment) || comment.Trim().Length < 5)
 		{
-			return (false, 0.0f);
+			return 0.0f;
 		}
 
-		// Clean up title for template injection
+		// Format matching the exact dataset.jsonl pattern used during training
+		string cleanTitle = string.IsNullOrWhiteSpace(workItemTitle) ? "Genel" : workItemTitle.Trim();
+		string formattedInput = $"{cleanTitle} [SEP] {comment}";
 
-string cleanTitle = string.IsNullOrWhiteSpace(workItemTitle) ? "bu görev" : $"\"{workItemTitle.Trim()}\"";
-	string hypothesis = $"Bu metin {cleanTitle} için yapılan somut teknik geliştirme, analiz veya test detaylarını içerir.";
-
-	// Get raw logits: [0 = Contradiction, 1 = Neutral, 2 = Entailment]
-	float[] logits = GetLogits(comment, hypothesis);
-
-	// Softmax over all 3 MNLI classes
-	float expContra = MathF.Exp(logits[0]);
-	float expNeutral = MathF.Exp(logits[1]);
-	float expEntail = MathF.Exp(logits[2]);
-
-	float total = expContra + expNeutral + expEntail;
-	float entailmentProb = expEntail / total;
-
-	return (entailmentProb >= passThreshold, entailmentProb);
-	}
-
-	private float GetEntailmentScore(string premise, string hypothesis)
-	{
-		string formattedInput = $"{premise} [SEP] {hypothesis}";
-
+		// Tokenize and cap at 128 tokens
 		var tokenIds = _tokenizer.EncodeToIds(formattedInput);
-		// const int MaxTokens = 256; // 128 is plenty for determining meaning
-		// if (tokenIds.Count > MaxTokens)
-		// {
-		// 	tokenIds = tokenIds.Take(MaxTokens).ToList();
-		// }
+		const int MaxTokens = 256;
+		if (tokenIds.Count > MaxTokens)
+		{
+			tokenIds = tokenIds.Take(MaxTokens).ToList();
+		}
+
 		long[] inputIds = tokenIds.Select(id => (long)id).ToArray();
 		long[] attentionMask = Enumerable.Repeat(1L, inputIds.Length).ToArray();
 
@@ -69,7 +52,6 @@ string cleanTitle = string.IsNullOrWhiteSpace(workItemTitle) ? "bu görev" : $"\
 			NamedOnnxValue.CreateFromTensor("attention_mask", new DenseTensor<long>(attentionMask, dimensions))
 		};
 
-		// Only add token_type_ids if the ONNX model metadata explicitly requires it
 		if (_session.InputMetadata.ContainsKey("token_type_ids"))
 		{
 			long[] tokenTypeIds = new long[inputIds.Length];
@@ -79,9 +61,26 @@ string cleanTitle = string.IsNullOrWhiteSpace(workItemTitle) ? "bu görev" : $"\
 		using var results = _session.Run(inputs);
 		var logits = results.First().AsTensor<float>();
 
-		int entailmentIndex = logits.Dimensions[1] > 2 ? 2 : 1;
-		return logits[0, entailmentIndex];
+		// Logits: [0 = Fail, 1 = Pass]
+
+		double failLogit = logits[0, 0];
+		double passLogit= logits[0, 1];
+		// 1. Calculate the logit margin (confidence difference)
+		double margin = passLogit - failLogit;
+
+		// 2. Calibration hyperparameters:
+		// baseline: Higher values penalize generic/short comments more aggressively
+		// temperature: Controls steepness of the curve
+
+		// 3. Sigmoid over the shifted margin
+		double normalized = 1.0f / (1.0f + Math.Exp(-(margin - baseline) / temperature));
+
+		// 4. Scale to 0 - 100 integer range
+		double finalScore = (int)Math.Round(normalized * 100.0f);
+
+		return  finalScore;
 	}
+
 		
 	public void Dispose()
 	{

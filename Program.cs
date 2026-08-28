@@ -25,7 +25,7 @@ builder.Services.AddHttpClient("IterationClient",client=>{
 );
 builder.Services.AddHostedService<IterationSyncBackgroundService>();
 builder.Services.AddSingleton(sp => 
-	new ZeroShotCommentClassifier("onnx/model.onnx", "onnx/tokenizer.json"));
+	new ZeroShotCommentClassifier("onnx/model.onnx", "onnx/vocab.txt"));
 var app = builder.Build();
 
 
@@ -50,17 +50,16 @@ app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =
 	});
 
 	if (items == null) return Results.BadRequest("Invalid JSON file.");
-
 	Console.WriteLine("\n--- Batch Evaluation Results ---");
     int correct=0,total=0;
 	foreach (var item in items)
 	{
         if(item.RejectReason==null || item.RejectReason=="LOW_QUALITY_COMMENT")
         {
-            var (isMeaningful, score) = classifier.Evaluate(item.Detail, item.WorkItemTitle, passThreshold: 0.65f);
+            var  score = classifier.Evaluate(item.Detail, item.WorkItemTitle,10,5);
             total++;
             bool expected = item.RejectReason == null;
-            if(expected==isMeaningful)correct++;
+            if(expected==score>=0.9)correct++;
         }
 	}
     Console.WriteLine($"correct={correct}  total={total}");
@@ -284,6 +283,7 @@ app.MapPost("/commentadded", async (JsonNode payload,AppDbContext db,ZeroShotCom
     if(editorUser!=assignedUser)return Results.Ok();
     int? workItemId = payload?["resource"]?["id"]?.GetValue<int>();
     string? message= payload?["resource"]?["fields"]?["System.History"]?.ToString();
+    string? title= payload?["resource"]?["fields"]?["System.Title"]?.ToString();
     string cleanText = WebUtility.HtmlDecode(
         Regex.Replace(message ?? string.Empty, "<.*?>", " ")
     );
@@ -310,8 +310,8 @@ app.MapPost("/commentadded", async (JsonNode payload,AppDbContext db,ZeroShotCom
         Description= $"",
         Timestamp = DateTime.UtcNow
     };
-    bool isSubstantive = classifier.Evaluate(cleanText,"placeholer" ,passThreshold: 0.65f).IsMeaningful;
-    Console.WriteLine(isSubstantive);
+    double evaulation = classifier.Evaluate(cleanText,title,10,5);
+    Console.WriteLine(evaulation);
     // if(meaningfulRegex.IsMatch(cleanText)){
     //     if(!(await db.Transactions.AnyAsync(t=> t.WorkItemId==workItemId&&t.User==user&&t.Type=="First Meaningfull Comment Added"))){
     //         transaction.Description=$"Meaningfull comment added to task granting the user {meaningfullCommentPoints} points";
@@ -331,7 +331,123 @@ app.MapGet("/", () => Results.Ok(new { message = "Webhook listener running on po
 
 }
 ));
+app.MapPost("/api/test-score", async (TestRequest req, ZeroShotCommentClassifier classifier) =>
+{
+	double score = classifier.Evaluate(req.Comment, req.Title,req.Baseline, req.Temperature);
 
+	return Results.Ok(new 
+	{
+		title = req.Title,
+		comment = req.Comment,
+		baseline = req.Baseline,
+		temperature = req.Temperature,
+		score = score,
+		pointsAwarded =0,
+		passed = score >= 50
+	});
+});
+
+// 2. The Interactive UI served directly from memory
+app.MapGet("/test-ui", () => 
+{
+	string html = @"
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+	<meta charset='UTF-8'>
+	<title>AI Scorer Tester</title>
+	<style>
+		body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; background: #f4f4f5; }
+		.card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+		.form-group { margin-bottom: 15px; }
+		.flex-row { display: flex; gap: 15px; }
+		.flex-row .form-group { flex: 1; }
+		label { display: block; font-weight: bold; margin-bottom: 5px; }
+		input, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+		small { color: #666; font-size: 12px; display: block; margin-top: 4px; }
+		button { background: #0078d4; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold;}
+		button:hover { background: #005a9e; }
+		pre { background: #1e1e1e; color: #d4d4d4; padding: 15px; border-radius: 4px; overflow-x: auto; }
+		.score-box { font-size: 24px; font-weight: bold; margin-top: 20px; padding: 15px; border-radius: 4px; text-align: center; }
+		.pass { background: #dff6dd; color: #107c10; border: 1px solid #107c10; }
+		.fail { background: #fde7e9; color: #a80000; border: 1px solid #a80000; }
+	</style>
+</head>
+<body>
+	<div class='card'>
+		<h2>🧪 Interactive Comment Scorer</h2>
+		
+		<div class='flex-row'>
+			<div class='form-group'>
+				<label>Baseline Offset</label>
+				<input type='number' id='baseline' value='0.0' step='0.1' />
+				<small>Higher value makes it harder to pass. Try 0.0 to 2.0</small>
+			</div>
+			<div class='form-group'>
+				<label>Temperature</label>
+				<input type='number' id='temperature' value='1.0' step='0.1' min='0.1' />
+				<small>Controls steepness. Try 0.8 to 1.5</small>
+			</div>
+		</div>
+
+		<div class='form-group'>
+			<label>Work Item Title</label>
+			<input type='text' id='title' value='Veritabanı yeni şemaya geçiş' />
+		</div>
+		
+		<div class='form-group'>
+			<label>Developer Comment</label>
+			<textarea id='comment' rows='4'>Eski transaction tablosundaki indeksler yeni kolon yapısına göre revize edildi.</textarea>
+		</div>
+		
+		<button onclick='testComment()'>Evaluate Comment</button>
+		
+		<div id='resultBox' class='score-box' style='display: none;'></div>
+		<pre id='jsonResult' style='display: none;'></pre>
+	</div>
+
+	<script>
+		async function testComment() {
+			const btn = document.querySelector('button');
+			btn.innerText = 'Evaluating...';
+			
+			const payload = {
+				title: document.getElementById('title').value,
+				comment: document.getElementById('comment').value,
+				baseline: parseFloat(document.getElementById('baseline').value) || 0.0,
+				temperature: parseFloat(document.getElementById('temperature').value) || 1.0
+			};
+
+			try {
+				const response = await fetch('/api/test-score', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(payload)
+				});
+				
+				const data = await response.json();
+				
+				const resultBox = document.getElementById('resultBox');
+				resultBox.style.display = 'block';
+				resultBox.className = 'score-box ' + (data.score >= 50 ? 'pass' : 'fail');
+				resultBox.innerText = `Score: ${data.score}/100 - ${data.score >= 50 ? 'PASS ✅' : 'FAIL ❌'}`;
+
+				const jsonResult = document.getElementById('jsonResult');
+				jsonResult.style.display = 'block';
+				jsonResult.innerText = JSON.stringify(data, null, 2);
+			} catch (e) {
+				alert('Evaluation failed. Check console.');
+				console.error(e);
+			} finally {
+				btn.innerText = 'Evaluate Comment';
+			}
+		}
+	</script>
+</body>
+</html>";
+
+	return Results.Content(html, "text/html");
+});
 app.Run();
 
 
@@ -369,4 +485,11 @@ public class TestCaseItem
 	public string? WorkItemTitle { get; set; }
 	public required string Detail { get; set; }
 	public string? RejectReason { get; set; }
+}
+public class TestRequest
+{
+	public string? Title { get; set; }
+	public string Comment { get; set; } = string.Empty;
+    public double Baseline { get; set; } = 0.0f;
+	public double Temperature { get; set; } = 1.0f;
 }
