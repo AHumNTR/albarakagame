@@ -1,3 +1,4 @@
+from transformers import EarlyStoppingCallback
 import numpy as np
 import torch
 import evaluate
@@ -14,12 +15,14 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 def main():
-	model_name = "xlm-roberta-large"
+	model_name = "ytu-ce-cosmos/modernbert-tr-base"
 	
 	torch.set_float32_matmul_precision('high')
 	# 1. Load the dataset
-	dataset = load_dataset("json", data_files="dataset_augmented.jsonl", split="train")
-	
+	dataset = load_dataset("json", data_files="data_labeled.jsonl", split="train")
+
+	if "label" in dataset.column_names:
+		dataset = dataset.rename_column("label", "labels")
 	# Split into train (90%) and validation (10%) sets
 	dataset = dataset.train_test_split(test_size=0.1, seed=42)
 	
@@ -30,8 +33,8 @@ def main():
 	# We truncate to 128 tokens to prevent the memory issues you saw earlier
 	def tokenize_function(examples):
 		return tokenizer(
-			examples["title"],
-			examples["detail"],
+		examples["title"],
+		examples["detail"],
 			padding=False,
 			truncation=True,
 			max_length=256
@@ -62,14 +65,16 @@ def main():
 	# 6. Setup Training Arguments
 	training_args = TrainingArguments(
 		output_dir="./modernbert-tr-finetuned",
-		learning_rate=2e-5,
+		learning_rate=1e-5,
 		per_device_train_batch_size=8,
 		per_device_eval_batch_size=8,
-		num_train_epochs=5,
-		weight_decay=0.01,
+		num_train_epochs=7,
+		warmup_ratio=0.1,    # Linearly ramp up LR for the first 10% of steps
+		weight_decay=0.05,
 		eval_strategy="epoch",
 		save_strategy="epoch",
 		load_best_model_at_end=True,
+		greater_is_better=False,
 		push_to_hub=False,
 		
 		tf32=True,
@@ -84,6 +89,7 @@ def main():
 		processing_class=tokenizer,
 		data_collator=data_collator,
 		compute_metrics=compute_metrics,
+		callbacks=[EarlyStoppingCallback(early_stopping_patience=2)]
 	)
 	
 	# 8. Train!

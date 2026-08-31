@@ -1,4 +1,5 @@
 import json
+import re
 #converts test.json into the format we want for training
 
 input_file = "/home/humn/albarakamltest/testOriginal.json"
@@ -11,6 +12,7 @@ transformed = []
 
 for item in data:
     title = item.get("WorkItemTitle") or "Belirtilmemiş"
+    clean_title = re.sub(r'^(talep|task|bug|iş emri)?\s*\d+\s*[-_:]\s*', '', title, flags=re.IGNORECASE).strip()
     detail = (item.get("Detail") or "").strip()
     reject_reason = item.get("RejectReason")
     
@@ -20,9 +22,8 @@ for item in data:
 
         # output title and detail as separate fields
         transformed.append({
-            "title": title.strip(),
+            "title": clean_title.strip(),
             "detail": detail,
-            "label": label
         })
 
 # Save as JSONL (one JSON object per line)
