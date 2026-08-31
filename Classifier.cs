@@ -16,34 +16,42 @@ public class ZeroShotCommentClassifier : IDisposable
 		_session = new InferenceSession(modelPath,sessionOptions);
 
 		//not vocab path/stream anymore 
-		using var vocabStream = File.OpenRead(vocabPath);
-		if(vocabPath.Split('.')[1]=="model")
-			_tokenizer =SentencePieceTokenizer.Create(vocabStream);
-		else _tokenizer=BertTokenizer.Create(vocabStream);
+		_tokenizer=WordPieceTokenizer.Create(vocabPath);
 	}
 
-	public  double  Evaluate(string comment, string? workItemTitle,double baseline,double temperature)
+	public  double  Evaluate(string comment, string? workItemTitle)
 	{
 		if (string.IsNullOrWhiteSpace(comment) || comment.Trim().Length < 5)
 		{
-			return 0.0f;
+			return 0.0;
 		}
 
-		// Format matching the exact dataset.jsonl pattern used during training
 		string cleanTitle = string.IsNullOrWhiteSpace(workItemTitle) ? "Genel" : workItemTitle.Trim();
-		string formattedInput = $"{cleanTitle} [SEP] {comment}";
+		string cleanComment = comment.Trim();
 
-		// Tokenize and cap at 128 tokens
-		var tokenIds = _tokenizer.EncodeToIds(formattedInput);
-		const int MaxTokens = 256;
-		if (tokenIds.Count > MaxTokens)
+		// ModernBERT-TR WordPiece uses [CLS] and [SEP]
+		int clsId = _tokenizer.EncodeToIds("[CLS]")[0];
+		int sepId = _tokenizer.EncodeToIds("[SEP]")[0];
+
+		var titleIds = _tokenizer.EncodeToIds(cleanTitle);
+		var commentIds = _tokenizer.EncodeToIds(cleanComment);
+
+		// Assemble pair sequence: [CLS] title [SEP] comment [SEP]
+		var tokenIds = new List<int> { clsId };
+		tokenIds.AddRange(titleIds);
+		tokenIds.Add(sepId);
+		tokenIds.AddRange(commentIds);
+		tokenIds.Add(sepId);
+
+		// Truncate to MaxTokens
+		if (tokenIds.Count > 256)
 		{
-			tokenIds = tokenIds.Take(MaxTokens).ToList();
+			tokenIds = tokenIds.Take(256 - 1).ToList();
+			tokenIds.Add(sepId); // Keep trailing [SEP]
 		}
 
 		long[] inputIds = tokenIds.Select(id => (long)id).ToArray();
 		long[] attentionMask = Enumerable.Repeat(1L, inputIds.Length).ToArray();
-
 		var dimensions = new[] { 1, inputIds.Length };
 
 		var inputs = new List<NamedOnnxValue>
@@ -59,26 +67,13 @@ public class ZeroShotCommentClassifier : IDisposable
 		}
 
 		using var results = _session.Run(inputs);
-		var logits = results.First().AsTensor<float>();
+		var outputTensor = results.First().AsTensor<float>();
 
-		// Logits: [0 = Fail, 1 = Pass]
+		// Model regression target is 0.0 to 1.0
+		float rawNormalizedScore = outputTensor[0, 0];
+		double clampedScore = Math.Clamp((double)rawNormalizedScore, 0.0, 1.0);
 
-		double failLogit = logits[0, 0];
-		double passLogit= logits[0, 1];
-		// 1. Calculate the logit margin (confidence difference)
-		double margin = passLogit - failLogit;
-
-		// 2. Calibration hyperparameters:
-		// baseline: Higher values penalize generic/short comments more aggressively
-		// temperature: Controls steepness of the curve
-
-		// 3. Sigmoid over the shifted margin
-		double normalized = 1.0f / (1.0f + Math.Exp(-(margin - baseline) / temperature));
-
-		// 4. Scale to 0 - 100 integer range
-		double finalScore = (int)Math.Round(normalized * 100.0f);
-
-		return  finalScore;
+		return Math.Round(clampedScore * 100.0, 1);
 	}
 
 		

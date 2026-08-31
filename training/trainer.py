@@ -10,77 +10,76 @@ from transformers import (
 	Trainer,
 	DataCollatorWithPadding
 )
+
 # Enable TF32 for matrix multiplications and cuDNN
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 def main():
 	model_name = "ytu-ce-cosmos/modernbert-tr-base"
-	
-	torch.set_float32_matmul_precision('high')
-	# 1. Load the dataset
-	dataset = load_dataset("json", data_files="data_labeled.jsonl", split="train")
+	torch.set_float32_matmul_precision("high")
 
-	if "label" in dataset.column_names:
-		dataset = dataset.rename_column("label", "labels")
-	# Split into train (90%) and validation (10%) sets
+	# 1. Load the scored dataset
+	dataset = load_dataset("json", data_files="data_scored.jsonl", split="train")
+
+	# Clean dataset: filter out rows where fields are missing or score is None
+
+	# Format the target column as float 'label' for regression
+	dataset = dataset.map(lambda x: {"label": float(x["accepted_score"])})
+
+	# Split into train (90%) and validation (10%)
 	dataset = dataset.train_test_split(test_size=0.1, seed=42)
-	
-	# 2. Load the Tokenizer
+
+	# 2. Load Tokenizer
 	tokenizer = AutoTokenizer.from_pretrained(model_name)
-	
-	# 3. Tokenization function
-	# We truncate to 128 tokens to prevent the memory issues you saw earlier
+
+	# 3. Tokenize pairs: (title, detail)
 	def tokenize_function(examples):
 		return tokenizer(
-		examples["title"],
-		examples["detail"],
+			examples["title"],
+			examples["detail"],
 			padding=False,
 			truncation=True,
 			max_length=256
 		)
-	
+
 	tokenized_datasets = dataset.map(tokenize_function, batched=True)
-	
-	# Data collator handles dynamic padding for batches
 	data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-	
-	# 4. Load the Model with a Sequence Classification head (2 labels: 0=Fail, 1=Pass)
+
+	# 4. Load Model for Regression (num_labels=1)
 	model = AutoModelForSequenceClassification.from_pretrained(
 		model_name,
-		num_labels=2
+		num_labels=1
 	)
-	
-	# 5. Define evaluation metrics (Accuracy and F1)
-	metric_acc = evaluate.load("accuracy")
-	metric_f1 = evaluate.load("f1")
-	
+
+	# 5. Metrics for Regression (MSE and Pearson Correlation)
+	metric_mse = evaluate.load("mse")
+
 	def compute_metrics(eval_pred):
-		logits, labels = eval_pred
-		predictions = np.argmax(logits, axis=-1)
-		acc = metric_acc.compute(predictions=predictions, references=labels)
-		f1 = metric_f1.compute(predictions=predictions, references=labels)
-		return {**acc, **f1}
-	
-	# 6. Setup Training Arguments
+		predictions, labels = eval_pred
+		predictions = np.squeeze(predictions)
+		mse = metric_mse.compute(predictions=predictions, references=labels)
+		return mse
+
+	# 6. Training Arguments
 	training_args = TrainingArguments(
 		output_dir="./modernbert-tr-finetuned",
-		learning_rate=1e-5,
+		learning_rate=3e-5,
 		per_device_train_batch_size=8,
 		per_device_eval_batch_size=8,
-		num_train_epochs=7,
-		warmup_ratio=0.1,    # Linearly ramp up LR for the first 10% of steps
-		weight_decay=0.05,
+		num_train_epochs=5,
+		warmup_ratio=0.1,
+		weight_decay=0.01,
 		eval_strategy="epoch",
 		save_strategy="epoch",
 		load_best_model_at_end=True,
+		metric_for_best_model="loss",
 		greater_is_better=False,
 		push_to_hub=False,
-		
 		tf32=True,
 	)
-	
-	# 7. Initialize Trainer
+
+	# 7. Trainer
 	trainer = Trainer(
 		model=model,
 		args=training_args,
@@ -91,14 +90,15 @@ def main():
 		compute_metrics=compute_metrics,
 		callbacks=[EarlyStoppingCallback(early_stopping_patience=2)]
 	)
-	
-	# 8. Train!
-	print("Starting training...")
+
+	# 8. Train
+	print("Starting regression training...")
 	trainer.train()
-	
-	# 9. Save the final model and tokenizer
+
+	# 9. Save
 	print("Saving model to ./final-model")
 	trainer.save_model("./final-model")
+	tokenizer.save_pretrained("./final-model")
 
 if __name__ == "__main__":
 	main()
