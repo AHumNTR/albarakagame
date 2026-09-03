@@ -14,30 +14,38 @@ builder.WebHost.ConfigureKestrel(options =>
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite("Data Source=app.db"));
-builder.Services.AddHttpClient("IterationClient",client=>{
+builder.Services.AddHttpClient("IterationClient", client =>
+{
 
     client.BaseAddress = new Uri("https://dev.azure.com/albarakatech/");
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     // TODO: move this token out of source control (user-secrets / env var / Key Vault) and rotate it.
-    string token =  "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
+    string token = "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
     client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    
+
 }
 );
 builder.Services.AddHostedService<IterationSyncBackgroundService>();
-builder.Services.AddSingleton(sp => 
-	new ZeroShotCommentClassifier("onnx/model.onnx", "onnx/vocab.txt"));
+builder.Services.AddHostedService<DailyMedalAwardBackgroundService>();
+builder.Services.AddSingleton(sp =>
+    new ZeroShotCommentClassifier("onnx/model.onnx", "onnx/vocab.txt"));
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+
+    // Seed a single row of scoring toggles if it doesn't exist yet.
+    if (!db.ScoringSettings.Any())
+    {
+        db.ScoringSettings.Add(new ScoringSettings { Id = 1 });
+        db.SaveChanges();
+    }
 }
 
 app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =>
 {
-
     var items = new List<TestCaseItem>();
     foreach (var line in File.ReadLines("/home/humn/albarakagame/training/data_scored.jsonl"))
     {
@@ -49,10 +57,10 @@ app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =
         }
     }
 
-	if (items == null) return Results.BadRequest("Invalid JSON file.");
+    if (items == null) return Results.BadRequest("Invalid JSON file.");
     var outputResults = new List<object>();
-	Console.WriteLine("\n--- Batch Evaluation Results ---");
-    int correct=0,total=0;
+    Console.WriteLine("\n--- Batch Evaluation Results ---");
+    int correct = 0, total = 0;
     foreach (var item in items)
     {
         var score = classifier.Evaluate(item.detail, item.title);
@@ -71,253 +79,273 @@ app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =
             Pass = score >= 50.0
         });
     }
-    var serializeOptions = new JsonSerializerOptions 
-    { 
-        WriteIndented = true 
+    var serializeOptions = new JsonSerializerOptions
+    {
+        WriteIndented = true
     };
     string outputJson = JsonSerializer.Serialize(outputResults, serializeOptions);
     await File.WriteAllTextAsync("/home/humn/albarakamltest/evaluation_results.json", outputJson);
     Console.WriteLine($"correct={correct}  total={total}");
-	return Results.Ok();
+    return Results.Ok();
 });
 
 app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
 {
-	Console.WriteLine(payload?.ToString());
+    var fields = payload?["resource"]?["fields"];
+    if (fields == null) return Results.Ok();
 
-	var fields = payload?["resource"]?["fields"];
-	if (fields == null) return Results.Ok();
+    var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
+    var assignedUser = payload?["resource"]?["revision"]?["fields"]?["System.AssignedTo"]?.ToString();
+    var iterationPath = payload?["resource"]?["revision"]?["fields"]?["System.IterationPath"]?.ToString();
+    int? workItemId = payload?["resource"]?["workItemId"]?.GetValue<int>();
 
-	var editorUser = payload?["resource"]?["revision"]?["fields"]?["System.ChangedBy"]?.ToString();
-	var assignedUser = payload?["resource"]?["revision"]?["fields"]?["System.AssignedTo"]?.ToString();
-	var iterationPath = payload?["resource"]?["revision"]?["fields"]?["System.IterationPath"]?.ToString();
-	int? workItemId = payload?["resource"]?["workItemId"]?.GetValue<int>();
-	
-	if (editorUser == null) return Results.Ok();
+    if (editorUser == null) return Results.Ok();
 
-	// 1. Ensure user exists before processing any transactions
-	var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == editorUser);
-	if (user == null)
-	{
-		user = new User { UserName = editorUser, Points = 0 };
-		db.Users.Add(user);
-		await db.SaveChangesAsync(); // Save immediately to generate user.Id
-	}
+    // 0. Load the scoring toggles once for this request
+    var settings = await db.ScoringSettings.FirstOrDefaultAsync(s => s.Id == 1) ?? new ScoringSettings();
 
-	var todayUtc = DateTime.Today;
+    // 1. Ensure user exists before processing any transactions
+    var user = await GetOrCreateUserAsync(db, editorUser);
+    var todayUtc = DateTime.Today;
 
-	// 2. Handle Iteration Update
-	if (fields["System.IterationPath"] != null)
-	{
-		var transaction = new PointTransaction
-		{
-			User = user,
-			UserId = user.Id,
-			Type = "Iteration Changed",
-			DeltaPoints = 0,
-			WorkItemId = workItemId,
-			Description = "Iteration changed to current iteration not changing anything",
-			Timestamp = DateTime.UtcNow
-		};
+    // 2. Handle Iteration Update
+    if (fields["System.IterationPath"] != null)
+    {
+        var transaction = new PointTransaction
+        {
+            User = user,
+            UserId = user.Id,
+            Type = "Iteration Changed",
+            DeltaPoints = 0,
+            WorkItemId = workItemId,
+            Description = "Iteration changed to current iteration not changing anything",
+            Timestamp = DateTime.UtcNow
+        };
 
-		if (iterationPath != IterationSyncBackgroundService.CurrentIterationPath)
-		{
-			var pointsEarnedInTask = await db.Transactions
-				.Where(t => t.UserId == user.Id && t.WorkItemId == workItemId)
-				.SumAsync(t => t.DeltaPoints);
-			
-			user.Points -= pointsEarnedInTask;
-			transaction.DeltaPoints = -pointsEarnedInTask;
-			transaction.Description = $"Iteration changed to non current iteration revoking the {pointsEarnedInTask} granted in this task";
-		}
-		db.Transactions.Add(transaction);
-		await db.SaveChangesAsync();
-	}
+        if (!settings.IterationChangedEnabled)
+        {
+            transaction.Description = "Iteration changed but scoring for this rule is currently disabled";
+        }
+        else if (iterationPath != IterationSyncBackgroundService.CurrentIterationPath)
+        {
+            var pointsEarnedInTask = await db.Transactions
+                .Where(t => t.UserId == user.Id && t.WorkItemId == workItemId)
+                .SumAsync(t => t.DeltaPoints);
 
-	// 3. Handle Completed Work Changed
-	if (fields["Microsoft.VSTS.Scheduling.CompletedWork"] != null)
-	{
-		if (assignedUser != null)
-		{
-			var completedWork = fields["Microsoft.VSTS.Scheduling.CompletedWork"];
-			int completedWorkNewValue = (int)(completedWork["newValue"]?.GetValue<double>() ?? 0);
-			int completedWorkOldValue = (int)(completedWork["oldValue"]?.GetValue<double>() ?? 0);
+            user.Points -= pointsEarnedInTask;
+            transaction.DeltaPoints = -pointsEarnedInTask;
+            transaction.Description = $"Iteration changed to non current iteration revoking the {pointsEarnedInTask} granted in this task";
+        }
+        db.Transactions.Add(transaction);
+        await db.SaveChangesAsync();
+    }
 
-			int completedPointsToday = await db.Transactions
-				.Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Completed Work Updated")
-				.SumAsync(t => t.DeltaPoints);
+    // 3. Handle Completed Work Changed
+    if (fields["Microsoft.VSTS.Scheduling.CompletedWork"] != null)
+    {
+        if (assignedUser != null)
+        {
+            var completedWork = fields["Microsoft.VSTS.Scheduling.CompletedWork"];
+            int completedWorkNewValue = (int)(completedWork["newValue"]?.GetValue<double>() ?? 0);
+            int completedWorkOldValue = (int)(completedWork["oldValue"]?.GetValue<double>() ?? 0);
 
-			var transaction = new PointTransaction
-			{
-				User = user,
-				UserId = user.Id,
-				Type = "Completed Work Updated",
-				DeltaPoints = 0,
-				WorkItemId = workItemId,
-				Timestamp = DateTime.UtcNow
-			};
+            int completedPointsToday = await db.Transactions
+                .Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Completed Work Updated")
+                .SumAsync(t => t.DeltaPoints);
 
-			int pointsToGiveAfterLimitCompleted = 0;
-			if (assignedUser == editorUser)
-			{
-				if (IterationSyncBackgroundService.CurrentIterationPath == iterationPath)
-				{
-					pointsToGiveAfterLimitCompleted = Math.Clamp(completedWorkNewValue - completedWorkOldValue, -8 - completedPointsToday, 8 - completedPointsToday);
-					transaction.Description = $"Completed work has been updated from {completedWorkOldValue} to {completedWorkNewValue} and after applying the limit {pointsToGiveAfterLimitCompleted} is rewarded/substracted";
-				}
-				else transaction.Description = "Completed work updated but no points are granted since iteration is not current";
-			}
-			else transaction.Description = "Completed work updated but no points are granted since assigned user isnt the one editing";
+            var transaction = new PointTransaction
+            {
+                User = user,
+                UserId = user.Id,
+                Type = "Completed Work Updated",
+                DeltaPoints = 0,
+                WorkItemId = workItemId,
+                Timestamp = DateTime.UtcNow
+            };
 
-			user.Points += pointsToGiveAfterLimitCompleted;
-			transaction.DeltaPoints = pointsToGiveAfterLimitCompleted;
+            int pointsToGiveAfterLimitCompleted = 0;
+            if (!settings.CompletedWorkEnabled)
+            {
+                transaction.Description = "Completed work updated but scoring for this rule is currently disabled";
+            }
+            else if (assignedUser == editorUser)
+            {
+                if (IterationSyncBackgroundService.CurrentIterationPath == iterationPath)
+                {
+                    pointsToGiveAfterLimitCompleted = Math.Clamp(completedWorkNewValue - completedWorkOldValue, -8 - completedPointsToday, 8 - completedPointsToday);
+                    transaction.Description = $"Completed work has been updated from {completedWorkOldValue} to {completedWorkNewValue} and after applying the limit {pointsToGiveAfterLimitCompleted} is rewarded/substracted";
+                }
+                else transaction.Description = "Completed work updated but no points are granted since iteration is not current";
+            }
+            else transaction.Description = "Completed work updated but no points are granted since assigned user isnt the one editing";
 
-			db.Transactions.Add(transaction);
-			await db.SaveChangesAsync();
-		}
-	}
+            user.Points += pointsToGiveAfterLimitCompleted;
+            transaction.DeltaPoints = pointsToGiveAfterLimitCompleted;
 
-	// 4. Handle Remaining Work Changed
-	if (fields["Microsoft.VSTS.Scheduling.RemainingWork"] != null)
-	{
-		if (assignedUser != null)
-		{
-			var remainingWork = fields["Microsoft.VSTS.Scheduling.RemainingWork"];
-			int remainingWorkNewValue = (int)(remainingWork["newValue"]?.GetValue<double>() ?? 0);
-			int remainingWorkOldValue = (int)(remainingWork["oldValue"]?.GetValue<double>() ?? 0);
+            db.Transactions.Add(transaction);
+            await db.SaveChangesAsync();
+        }
+    }
 
-			int remainingPointsToday = await db.Transactions
-				.Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Remaining Work Updated")
-				.SumAsync(t => t.DeltaPoints);
+    // 4. Handle Remaining Work Changed
+    if (fields["Microsoft.VSTS.Scheduling.RemainingWork"] != null)
+    {
+        if (assignedUser != null)
+        {
+            var remainingWork = fields["Microsoft.VSTS.Scheduling.RemainingWork"];
+            int remainingWorkNewValue = (int)(remainingWork["newValue"]?.GetValue<double>() ?? 0);
+            int remainingWorkOldValue = (int)(remainingWork["oldValue"]?.GetValue<double>() ?? 0);
 
-			var transaction = new PointTransaction
-			{
-				User = user,
-				UserId = user.Id,
-				Type = "Remaining Work Updated",
-				DeltaPoints = 0,
-				WorkItemId = workItemId,
-				Timestamp = DateTime.UtcNow
-			};
+            int remainingPointsToday = await db.Transactions
+                .Where(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Remaining Work Updated")
+                .SumAsync(t => t.DeltaPoints);
 
-			int pointsToGiveAfterLimitRemaining = 0;
-			if (assignedUser == editorUser)
-			{
-				if (IterationSyncBackgroundService.CurrentIterationPath == iterationPath)
-				{
-					pointsToGiveAfterLimitRemaining = Math.Clamp(-(remainingWorkNewValue - remainingWorkOldValue), -8 - remainingPointsToday, 8 - remainingPointsToday);
-					transaction.Description = $"Remaining work has been updated from {remainingWorkOldValue} to {remainingWorkNewValue} and after applying the limit {pointsToGiveAfterLimitRemaining} is rewarded/substracted";
-				}
-				else transaction.Description = "Remaining work updated but no points are granted since iteration is not current";
-			}
-			else transaction.Description = "Remaining work updated but no points are granted since assigned user isnt the one editing";
+            var transaction = new PointTransaction
+            {
+                User = user,
+                UserId = user.Id,
+                Type = "Remaining Work Updated",
+                DeltaPoints = 0,
+                WorkItemId = workItemId,
+                Timestamp = DateTime.UtcNow
+            };
 
-			user.Points += pointsToGiveAfterLimitRemaining;
-			transaction.DeltaPoints = pointsToGiveAfterLimitRemaining;
+            int pointsToGiveAfterLimitRemaining = 0;
+            if (!settings.RemainingWorkEnabled)
+            {
+                transaction.Description = "Remaining work updated but scoring for this rule is currently disabled";
+            }
+            else if (assignedUser == editorUser)
+            {
+                if (IterationSyncBackgroundService.CurrentIterationPath == iterationPath)
+                {
+                    pointsToGiveAfterLimitRemaining = Math.Clamp(-(remainingWorkNewValue - remainingWorkOldValue), -8 - remainingPointsToday, 8 - remainingPointsToday);
+                    transaction.Description = $"Remaining work has been updated from {remainingWorkOldValue} to {remainingWorkNewValue} and after applying the limit {pointsToGiveAfterLimitRemaining} is rewarded/substracted";
+                }
+                else transaction.Description = "Remaining work updated but no points are granted since iteration is not current";
+            }
+            else transaction.Description = "Remaining work updated but no points are granted since assigned user isnt the one editing";
 
-			db.Transactions.Add(transaction);
-			await db.SaveChangesAsync();
-		}
-	}
+            user.Points += pointsToGiveAfterLimitRemaining;
+            transaction.DeltaPoints = pointsToGiveAfterLimitRemaining;
 
-	// 5. Handle State Changed
-	if (fields["System.State"] != null)
-	{
-		if (editorUser == assignedUser)
-		{
-			var transaction = new PointTransaction
-			{
-				User = user,
-				UserId = user.Id,
-				Type = "State Changed",
-				DeltaPoints = 0,
-				WorkItemId = workItemId,
-				Description = "State changed to something other than done not granting any points",
-				Timestamp = DateTime.UtcNow
-			};
+            db.Transactions.Add(transaction);
+            await db.SaveChangesAsync();
+        }
+    }
 
-			int earnedPointTotal = 0;
-			if (iterationPath == IterationSyncBackgroundService.CurrentIterationPath)
-			{
-				if (fields["System.State"]?["newValue"]?.ToString() == "Closed")
-				{
-					// Checks if any completed work was logged today before granting closing points
-					if (await db.Transactions.AnyAsync(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Completed Work Updated"))
-					{
-						earnedPointTotal = (int?)payload?["resource"]?["revision"]?["fields"]?["Microsoft.VSTS.Scheduling.CompletedWork"]?.GetValue<double>() ?? 0;
-						transaction.Description = $"State changed to done granting {earnedPointTotal} points";
-					}
-					else transaction.Description = "State changed to done but points not granted due to not completing any work today";
-				}
-				else transaction.Description = $"State changed to done but no points were granted since the iteration was {iterationPath} and not the current which is {IterationSyncBackgroundService.CurrentIterationPath}";
+    // 5. Handle State Changed
+    if (fields["System.State"] != null)
+    {
+        if (editorUser == assignedUser)
+        {
+            var transaction = new PointTransaction
+            {
+                User = user,
+                UserId = user.Id,
+                Type = "State Changed",
+                DeltaPoints = 0,
+                WorkItemId = workItemId,
+                Description = "State changed to something other than done not granting any points",
+                Timestamp = DateTime.UtcNow
+            };
 
-				transaction.DeltaPoints = earnedPointTotal;
-				user.Points += earnedPointTotal;
-			}
+            int earnedPointTotal = 0;
+            if (!settings.StateChangedEnabled)
+            {
+                transaction.Description = "State changed but scoring for this rule is currently disabled";
+            }
+            else if (iterationPath == IterationSyncBackgroundService.CurrentIterationPath)
+            {
+                if (fields["System.State"]?["newValue"]?.ToString() == "Closed")
+                {
+                    // Checks if any completed work was logged today before granting closing points
+                    if (await db.Transactions.AnyAsync(t => t.UserId == user.Id && t.Timestamp >= todayUtc && t.Type == "Completed Work Updated"))
+                    {
+                        earnedPointTotal = (int?)payload?["resource"]?["revision"]?["fields"]?["Microsoft.VSTS.Scheduling.CompletedWork"]?.GetValue<double>() ?? 0;
+                        transaction.Description = $"State changed to done granting {earnedPointTotal} points";
+                    }
+                    else transaction.Description = "State changed to done but points not granted due to not completing any work today";
+                }
+                else transaction.Description = $"State changed to done but no points were granted since the iteration was {iterationPath} and not the current which is {IterationSyncBackgroundService.CurrentIterationPath}";
 
-			db.Transactions.Add(transaction);
-			await db.SaveChangesAsync();
-		}
-	}
+                transaction.DeltaPoints = earnedPointTotal;
+                user.Points += earnedPointTotal;
+            }
 
-	return Results.Ok();
+            db.Transactions.Add(transaction);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    return Results.Ok();
 });
 
-const int meaningfullCommentPoints=50;
-app.MapPost("/commentadded", async (JsonNode payload,AppDbContext db,ZeroShotCommentClassifier classifier) => 
+const int meaningfullCommentPoints = 50;
+app.MapPost("/commentadded", async (JsonNode payload, AppDbContext db, ZeroShotCommentClassifier classifier) =>
 {
     //give the meaningfullCommentPoints amount points to the user if its the assigned user and its the first meaningfull comment
 
     var editorUser = payload?["resource"]?["fields"]?["System.ChangedBy"]?.ToString();
     var assignedUser = payload?["resource"]?["fields"]?["System.AssignedTo"]?.ToString();
-    if(editorUser!=assignedUser)return Results.Ok();
+    if (editorUser != assignedUser) return Results.Ok();
     int? workItemId = payload?["resource"]?["id"]?.GetValue<int>();
-    string? message= payload?["resource"]?["fields"]?["System.History"]?.ToString();
-    string? title= payload?["resource"]?["fields"]?["System.Title"]?.ToString();
+    string? message = payload?["resource"]?["fields"]?["System.History"]?.ToString();
+    string? title = payload?["resource"]?["fields"]?["System.Title"]?.ToString();
     string cleanText = WebUtility.HtmlDecode(
-        Regex.Replace(message ?? string.Empty, "<.*?>", " ")
+    Regex.Replace(message ?? string.Empty, "<.*?>", " ")
     );
 
-    var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == editorUser);
-    if (user == null)
-    {
-        user = new User { UserName = editorUser, Points = 0 };
-        db.Users.Add(user);
-    }
+    var settings = await db.ScoringSettings.FirstOrDefaultAsync(s => s.Id == 1) ?? new ScoringSettings();
+
+    var user = await GetOrCreateUserAsync(db, editorUser);
 
     var meaningfulRegex = new Regex(
-        @"^(?!\b(done|ok|okay|fixed|tested|wip|lgtm|\+1|asdf|test)\b$)(?=(?:.*\b[a-zA-Z]{2,}\b){4,}).{15,}$",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
+    @"^(?!\b(done|ok|okay|fixed|tested|wip|lgtm|\+1|asdf|test)\b$)(?=(?:.*\b[a-zA-Z]{2,}\b){4,}).{15,}$",
+    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
     );
 
     var transaction = new PointTransaction
     {
-        User=user,
+        User = user,
         UserId = user.Id,
-        Type="Comment Added",
+        Type = "Comment Added",
         DeltaPoints = 0,//shouldnt cause a issue in seperating them since they cant call at the same time
         WorkItemId = workItemId,
-        Description= $"",
+        Description = $"",
         Timestamp = DateTime.UtcNow
     };
-    double evaulation = classifier.Evaluate(cleanText,title)/100;
 
-    Console.WriteLine(evaulation);
-    if(evaulation>=0.5){
-        //check if this is the first meaningfull comment (checking the points to see if its the first)
-        if(!(await db.Transactions.AnyAsync(t=> t.WorkItemId==workItemId&&t.User==user&&t.Type=="Comment Added"&&t.DeltaPoints>0))){
-            transaction.Description=$"Meaningfull comment added to task granting the user {(int)(evaulation*meaningfullCommentPoints)} points";
-            transaction.DeltaPoints=(int)(evaulation*meaningfullCommentPoints);
-            user.Points+=(int)(evaulation*meaningfullCommentPoints);
-        }
-        else{
-            transaction.Description=$"Meaningfull comment added to task but not granting any points since the user already gained points from this task for meaningful comments";
-            transaction.DeltaPoints=0;
-        }
+    if (!settings.CommentsEnabled)
+    {
+        transaction.Description = $"Comment added but scoring for this rule is currently disabled. The comment added: {cleanText}";
+        transaction.DeltaPoints = 0;
     }
-    else {
-        transaction.Description=$"Low effort or automated comment added to the task granting no points";
-        transaction.DeltaPoints=0;
+    else
+    {
+        double evaulation = classifier.Evaluate(cleanText, title) / 100;
+
+        Console.WriteLine(evaulation);
+        if (evaulation >= 0.5)
+        {
+            //check if this is the first meaningfull comment (checking the points to see if its the first)
+            if (!(await db.Transactions.AnyAsync(t => t.WorkItemId == workItemId && t.User == user && t.Type == "Comment Added" && t.DeltaPoints > 0)))
+            {
+                transaction.Description = $"Meaningfull comment added to task granting the user {(int)(evaulation * meaningfullCommentPoints)} points. The comment added: {cleanText}";
+                transaction.DeltaPoints = (int)(evaulation * meaningfullCommentPoints);
+                user.Points += (int)(evaulation * meaningfullCommentPoints);
+            }
+            else
+            {
+                transaction.Description = $"Meaningfull comment added to task but not granting any points since the user already gained points from this task for meaningful comments. The comment added: {cleanText}";
+                transaction.DeltaPoints = 0;
+            }
+        }
+        else
+        {
+            transaction.Description = $"Low effort or automated comment added to the task granting no points. The comment added: {cleanText}";
+            transaction.DeltaPoints = 0;
+        }
     }
 
     db.Transactions.Add(transaction);
@@ -328,46 +356,120 @@ app.MapPost("/commentadded", async (JsonNode payload,AppDbContext db,ZeroShotCom
 );
 app.MapPost("/api/test-score", async (TestRequest req, ZeroShotCommentClassifier classifier) =>
 {
-	double score = classifier.Evaluate(req.Comment, req.Title);
+    double score = classifier.Evaluate(req.Comment, req.Title);
 
-	return Results.Ok(new 
-	{
-		title = req.Title,
-		comment = req.Comment,
-		score = score,
-		pointsAwarded =0,
-		passed = score >= 50
-	});
+    return Results.Ok(new
+    {
+        title = req.Title,
+        comment = req.Comment,
+        score = score,
+        pointsAwarded = 0,
+        passed = score >= 50
+    });
 });
 
 // ---------------------------------------------------------------------
 // Dashboard data APIs
 // ---------------------------------------------------------------------
 
-app.MapGet("/api/leaderboard", async (AppDbContext db) =>
+app.MapGet("/api/leaderboard", async (AppDbContext db, int page = 1, int pageSize = 15) =>
 {
-    var leaderboard = await db.Users
+    page = Math.Max(1, page);
+    pageSize = Math.Clamp(pageSize, 1, 100);
+    var todayUtc = DateTime.UtcNow.Date;
+
+    // 1. Fetch today's transactions for the live daily badges
+    var todayTransactions = await db.Transactions
+        .AsNoTracking()
+        .Where(t => t.Timestamp >= todayUtc)
+        .Select(t => new { t.UserId, t.DeltaPoints, t.Type })
+        .ToListAsync();
+
+    var topWarriorUserId = todayTransactions
+        .GroupBy(t => t.UserId)
+        .Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
+        .Where(x => x.Total > 0)
+        .OrderByDescending(x => x.Total)
+        .Select(x => (int?)x.UserId)
+        .FirstOrDefault();
+
+    var topCommenterUserId = todayTransactions
+        .Where(t => t.Type == "Comment Added")
+        .GroupBy(t => t.UserId)
+        .Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
+        .Where(x => x.Total > 0)
+        .OrderByDescending(x => x.Total)
+        .Select(x => (int?)x.UserId)
+        .FirstOrDefault();
+
+    // 2. Query paginated users
+    var query = db.Users
         .OrderByDescending(u => u.Points)
-        .ThenBy(u => u.UserName)
+        .ThenBy(u => u.UserName);
+
+    var totalCount = await query.CountAsync();
+    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
+    var users = await query
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
         .Select(u => new { u.Id, u.UserName, u.Points })
         .ToListAsync();
 
-    return Results.Ok(leaderboard);
-});
+    var userIds = users.Select(u => u.Id).ToList();
 
-app.MapGet("/api/users", async (AppDbContext db) =>
-{
-    var users = await db.Users
-        .OrderBy(u => u.UserName)
-        .Select(u => u.UserName)
+    // 3. Batch load permanent medals for the users on the current page
+    var userMedals = await db.Medals
+        .AsNoTracking()
+        .Where(m => userIds.Contains(m.UserId))
+        .OrderByDescending(m => m.Timestamp)
+        .Select(m => new { m.UserId, m.Type, m.Description, m.Timestamp })
         .ToListAsync();
 
-    return Results.Ok(users);
+    var medalGroup = userMedals
+        .GroupBy(m => m.UserId)
+        .ToDictionary(g => g.Key, g => g.ToList());
+
+    // 4. Combine into final DTO
+    var items = users.Select(u =>
+    {
+        var dailyBadges = new List<string>();
+        if (topWarriorUserId.HasValue && u.Id == topWarriorUserId.Value)
+            dailyBadges.Add("⚔️ Daily Warrior");
+        if (topCommenterUserId.HasValue && u.Id == topCommenterUserId.Value)
+            dailyBadges.Add("💬 Daily Commenter");
+
+        var permanent = medalGroup.TryGetValue(u.Id, out var mList) ? mList : new();
+
+        return new
+        {
+            id = u.Id,
+            userName = u.UserName,
+            points = u.Points,
+            dailyBadges,
+            medals = permanent.Select(m => new
+            {
+                type = m.Type,
+                description = m.Description,
+                date = m.Timestamp.ToString("yyyy-MM-dd")
+            })
+        };
+    });
+
+    return Results.Ok(new
+    {
+        items,
+        totalCount,
+        page,
+        pageSize,
+        totalPages
+    });
 });
 
-app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workItemId, int take = 100) =>
+app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workItemId, int page = 1, int pageSize = 20) =>
 {
-    take = Math.Clamp(take, 1, 500);
+    page = Math.Max(1, page);
+    pageSize = Math.Clamp(pageSize, 1, 100);
 
     var query = db.Transactions
         .Include(t => t.User)
@@ -380,8 +482,12 @@ app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workI
     if (workItemId.HasValue)
         query = query.Where(t => t.WorkItemId == workItemId);
 
+    var totalCount = await query.CountAsync();
+    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
     var results = await query
-        .Take(take)
+        .Skip((page - 1) * pageSize)
+        .Take(pageSize)
         .Select(t => new
         {
             t.Id,
@@ -394,474 +500,119 @@ app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workI
         })
         .ToListAsync();
 
-    return Results.Ok(results);
+    return Results.Ok(new
+    {
+        items = results,
+        totalCount,
+        page,
+        pageSize,
+        totalPages
+    });
 });
 
-app.MapGet("/dashboard", () =>
+app.MapGet("/api/users", async (AppDbContext db) =>
 {
-	string html = @"
-<!DOCTYPE html>
-<html lang=""en"">
-<head>
-<meta charset=""UTF-8"">
-<meta name=""viewport"" content=""width=device-width, initial-scale=1"">
-<title>Team Points Dashboard</title>
-<style>
-  :root {
-    --bg: #f4f4f5;
-    --card-bg: #ffffff;
-    --text: #1b1b1f;
-    --muted: #52525b;
-    --border: #d4d4d8;
-    --accent: #0060c2; /* AA contrast on white */
-    --accent-dark: #00468f;
-    --pass-bg: #eafaf0;
-    --pass-border: #0f7a3d;
-    --fail-bg: #fdecec;
-    --fail-border: #b3261e;
-    --focus: #ff8f00;
-  }
-  * { box-sizing: border-box; }
-  body {
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 20px;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.5;
-  }
-  .skip-link {
-    position: absolute;
-    left: -9999px;
-    top: 0;
-    background: var(--accent-dark);
-    color: #fff;
-    padding: 10px 16px;
-    z-index: 100;
-    border-radius: 0 0 6px 0;
-  }
-  .skip-link:focus {
-    left: 0;
-  }
-  h1 { font-size: 1.6rem; margin-bottom: 4px; }
-  .subtitle { color: var(--muted); margin-top: 0; margin-bottom: 20px; }
-  .card {
-    background: var(--card-bg);
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-    border: 1px solid var(--border);
-  }
-  [role=""tablist""] {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 16px;
-    border-bottom: 2px solid var(--border);
-  }
-  [role=""tab""] {
-    background: none;
-    border: none;
-    padding: 10px 18px;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--muted);
-    cursor: pointer;
-    border-bottom: 3px solid transparent;
-    margin-bottom: -2px;
-  }
-  [role=""tab""][aria-selected=""true""] {
-    color: var(--accent-dark);
-    border-bottom-color: var(--accent);
-  }
-  [role=""tab""]:hover { color: var(--accent-dark); }
-  [role=""tabpanel""] { padding-top: 4px; }
-  [role=""tabpanel""][hidden] { display: none; }
+    var users = await db.Users
+        .OrderBy(u => u.UserName)
+        .Select(u => u.UserName)
+        .ToListAsync();
 
-  a, button, input, select, textarea, [tabindex] {
-    outline-offset: 2px;
-  }
-  a:focus-visible, button:focus-visible, input:focus-visible,
-  select:focus-visible, textarea:focus-visible, [role=""tab""]:focus-visible {
-    outline: 3px solid var(--focus);
-    outline-offset: 2px;
-  }
-
-  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-  caption { text-align: left; font-weight: 600; margin-bottom: 8px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
-  th { background: #ececef; position: sticky; top: 0; }
-  tbody tr:nth-child(odd) { background: #fafafa; }
-  .rank-1 { font-weight: 700; }
-  .points-positive { color: #0f7a3d; font-weight: 600; }
-  .points-negative { color: #b3261e; font-weight: 600; }
-  .points-zero { color: var(--muted); }
-
-  .filters { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 14px; align-items: end; }
-  .form-group { margin-bottom: 4px; }
-  .flex-row { display: flex; gap: 15px; flex-wrap: wrap; }
-  .flex-row .form-group { flex: 1; min-width: 180px; }
-  label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.92rem; }
-  input, textarea, select {
-    width: 100%;
-    padding: 9px;
-    border: 1px solid #8a8a92;
-    border-radius: 4px;
-    font-size: 1rem;
-    background: #fff;
-    color: var(--text);
-  }
-  small.hint { color: var(--muted); font-size: 12px; display: block; margin-top: 4px; }
-  button.action {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 700;
-  }
-  button.action:hover { background: var(--accent-dark); }
-  button.action:disabled { background: #9aa0a6; cursor: not-allowed; }
-
-  pre {
-    background: #1e1e1e;
-    color: #d4d4d8;
-    padding: 15px;
-    border-radius: 4px;
-    overflow-x: auto;
-    font-size: 0.85rem;
-  }
-  .result-box {
-    font-size: 1.2rem;
-    font-weight: 700;
-    margin-top: 18px;
-    padding: 14px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .result-box.pass { background: var(--pass-bg); color: var(--pass-border); border: 1px solid var(--pass-border); }
-  .result-box.fail { background: var(--fail-bg); color: var(--fail-border); border: 1px solid var(--fail-border); }
-  .visually-hidden {
-    position: absolute;
-    width: 1px; height: 1px;
-    margin: -1px; padding: 0; border: 0;
-    clip: rect(0 0 0 0);
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .status-line { color: var(--muted); font-size: 0.9rem; margin-top: 6px; }
-  .empty-state { color: var(--muted); font-style: italic; padding: 16px 0; }
-
-  @media (prefers-reduced-motion: reduce) {
-    * { animation: none !important; transition: none !important; }
-  }
-</style>
-</head>
-<body>
-<a class=""skip-link"" href=""#main"">Skip to main content</a>
-
-<header>
-  <h1>Team Points Dashboard</h1>
-  <p class=""subtitle"">Leaderboard, point transaction history, and the comment scorer tester.</p>
-</header>
-
-<main id=""main"" class=""card"">
-  <div role=""tablist"" aria-label=""Dashboard sections"">
-    <button role=""tab"" id=""tab-leaderboard"" aria-controls=""panel-leaderboard"" aria-selected=""true"" tabindex=""0"">Leaderboard</button>
-    <button role=""tab"" id=""tab-transactions"" aria-controls=""panel-transactions"" aria-selected=""false"" tabindex=""-1"">Transactions</button>
-    <button role=""tab"" id=""tab-tester"" aria-controls=""panel-tester"" aria-selected=""false"" tabindex=""-1"">Comment Tester</button>
-  </div>
-
-  <!-- LEADERBOARD -->
-  <section id=""panel-leaderboard"" role=""tabpanel"" aria-labelledby=""tab-leaderboard"" tabindex=""0"">
-    <div class=""filters"">
-      <button class=""action"" id=""refreshLeaderboardBtn"" type=""button"">Refresh leaderboard</button>
-    </div>
-    <p id=""leaderboardStatus"" class=""status-line"" role=""status"" aria-live=""polite""></p>
-    <div id=""leaderboardTableWrap""></div>
-  </section>
-
-  <!-- TRANSACTIONS -->
-  <section id=""panel-transactions"" role=""tabpanel"" aria-labelledby=""tab-transactions"" tabindex=""0"" hidden>
-    <form id=""transactionFilterForm"">
-      <div class=""flex-row"">
-        <div class=""form-group"">
-          <label for=""txUserFilter"">Filter by user</label>
-          <select id=""txUserFilter"">
-            <option value="""">All users</option>
-          </select>
-        </div>
-        <div class=""form-group"">
-          <label for=""txWorkItemFilter"">Filter by work item ID</label>
-          <input type=""number"" id=""txWorkItemFilter"" placeholder=""e.g. 4213"" min=""0"" />
-        </div>
-        <div class=""form-group"">
-          <label for=""txLimit"">Rows to show</label>
-          <input type=""number"" id=""txLimit"" value=""100"" min=""1"" max=""500"" />
-        </div>
-      </div>
-      <button class=""action"" type=""submit"">Apply filters</button>
-    </form>
-    <p id=""transactionsStatus"" class=""status-line"" role=""status"" aria-live=""polite""></p>
-    <div id=""transactionsTableWrap""></div>
-  </section>
-
-  <!-- COMMENT TESTER -->
-  <section id=""panel-tester"" role=""tabpanel"" aria-labelledby=""tab-tester"" tabindex=""0"" hidden>
-    <form id=""testerForm"">
-      <div class=""form-group"">
-        <label for=""title"">Work item title</label>
-        <input type=""text"" id=""title"" name=""title"" value=""Veritabani yeni semaya gecis"" />
-      </div>
-
-      <div class=""form-group"">
-        <label for=""comment"">Developer comment</label>
-        <textarea id=""comment"" name=""comment"" rows=""4"">Eski transaction tablosundaki indeksler yeni kolon yapisina gore revize edildi.</textarea>
-      </div>
-
-      <button class=""action"" type=""submit"" id=""evaluateBtn"">Evaluate comment</button>
-    </form>
-
-    <div id=""resultBox"" class=""result-box"" hidden role=""status"" aria-live=""polite""></div>
-    <h2 class=""visually-hidden"">Raw evaluation response</h2>
-    <pre id=""jsonResult"" hidden></pre>
-  </section>
-</main>
-
-<script>
-(function () {
-  // ---------- Tab logic (WAI-ARIA Tabs pattern, arrow-key + Home/End support) ----------
-  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role=""tab""]'));
-  var panels = tabs.map(function (t) { return document.getElementById(t.getAttribute('aria-controls')); });
-
-  function selectTab(index) {
-    tabs.forEach(function (t, i) {
-      var selected = i === index;
-      t.setAttribute('aria-selected', selected ? 'true' : 'false');
-      t.tabIndex = selected ? 0 : -1;
-      panels[i].hidden = !selected;
-    });
-    tabs[index].focus();
-  }
-
-  tabs.forEach(function (tab, i) {
-    tab.addEventListener('click', function () { selectTab(i); });
-    tab.addEventListener('keydown', function (e) {
-      var newIndex = null;
-      if (e.key === 'ArrowRight') newIndex = (i + 1) % tabs.length;
-      else if (e.key === 'ArrowLeft') newIndex = (i - 1 + tabs.length) % tabs.length;
-      else if (e.key === 'Home') newIndex = 0;
-      else if (e.key === 'End') newIndex = tabs.length - 1;
-      if (newIndex !== null) {
-        e.preventDefault();
-        selectTab(newIndex);
-      }
-    });
-  });
-
-  // ---------- Helpers ----------
-  function escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/""/g, '&quot;');
-  }
-
-  function pointsClass(n) {
-    if (n > 0) return 'points-positive';
-    if (n < 0) return 'points-negative';
-    return 'points-zero';
-  }
-
-  function formatTimestamp(ts) {
-    try {
-      return new Date(ts).toLocaleString();
-    } catch (e) {
-      return ts;
-    }
-  }
-
-  // ---------- Leaderboard ----------
-  var leaderboardWrap = document.getElementById('leaderboardTableWrap');
-  var leaderboardStatus = document.getElementById('leaderboardStatus');
-
-  async function loadLeaderboard() {
-    leaderboardStatus.textContent = 'Loading leaderboard...';
-    try {
-      var res = await fetch('/api/leaderboard');
-      if (!res.ok) throw new Error('Request failed with status ' + res.status);
-      var data = await res.json();
-
-      if (!data.length) {
-        leaderboardWrap.innerHTML = '<p class=""empty-state"">No users yet.</p>';
-        leaderboardStatus.textContent = 'No users found.';
-        return;
-      }
-
-      var rows = data.map(function (u, i) {
-        return '<tr' + (i === 0 ? ' class=""rank-1""' : '') + '>' +
-          '<td>' + (i + 1) + '</td>' +
-          '<td>' + escapeHtml(u.userName) + '</td>' +
-          '<td class=""' + pointsClass(u.points) + '"">' + u.points + '</td>' +
-          '</tr>';
-      }).join('');
-
-      leaderboardWrap.innerHTML =
-        '<table>' +
-        '<caption>Users ranked by total points</caption>' +
-        '<thead><tr><th scope=""col"">Rank</th><th scope=""col"">User</th><th scope=""col"">Points</th></tr></thead>' +
-        '<tbody>' + rows + '</tbody>' +
-        '</table>';
-
-      leaderboardStatus.textContent = 'Leaderboard updated. ' + data.length + ' users shown.';
-    } catch (e) {
-      leaderboardWrap.innerHTML = '';
-      leaderboardStatus.textContent = 'Could not load leaderboard: ' + e.message;
-    }
-  }
-
-  document.getElementById('refreshLeaderboardBtn').addEventListener('click', loadLeaderboard);
-
-  // ---------- Transactions ----------
-  var txWrap = document.getElementById('transactionsTableWrap');
-  var txStatus = document.getElementById('transactionsStatus');
-  var txUserFilter = document.getElementById('txUserFilter');
-
-  async function loadUserFilterOptions() {
-    try {
-      var res = await fetch('/api/users');
-      if (!res.ok) return;
-      var users = await res.json();
-      users.forEach(function (u) {
-        var opt = document.createElement('option');
-        opt.value = u;
-        opt.textContent = u;
-        txUserFilter.appendChild(opt);
-      });
-    } catch (e) {
-      // Non-fatal: user filter dropdown just stays with ""All users"".
-    }
-  }
-
-  async function loadTransactions() {
-    var user = txUserFilter.value;
-    var workItemId = document.getElementById('txWorkItemFilter').value;
-    var limit = document.getElementById('txLimit').value || 100;
-
-    var params = new URLSearchParams();
-    if (user) params.set('user', user);
-    if (workItemId) params.set('workItemId', workItemId);
-    params.set('take', limit);
-
-    txStatus.textContent = 'Loading transactions...';
-    try {
-      var res = await fetch('/api/transactions?' + params.toString());
-      if (!res.ok) throw new Error('Request failed with status ' + res.status);
-      var data = await res.json();
-
-      if (!data.length) {
-        txWrap.innerHTML = '<p class=""empty-state"">No transactions match these filters.</p>';
-        txStatus.textContent = 'No transactions found.';
-        return;
-      }
-
-      var rows = data.map(function (t) {
-        return '<tr>' +
-          '<td>' + formatTimestamp(t.timestamp) + '</td>' +
-          '<td>' + escapeHtml(t.userName) + '</td>' +
-          '<td>' + escapeHtml(t.type) + '</td>' +
-          '<td class=""' + pointsClass(t.deltaPoints) + '"">' + t.deltaPoints + '</td>' +
-          '<td>' + (t.workItemId != null ? t.workItemId : '—') + '</td>' +
-          '<td>' + escapeHtml(t.description) + '</td>' +
-          '</tr>';
-      }).join('');
-
-      txWrap.innerHTML =
-        '<table>' +
-        '<caption>Point transaction history</caption>' +
-        '<thead><tr>' +
-        '<th scope=""col"">Time</th><th scope=""col"">User</th><th scope=""col"">Type</th>' +
-        '<th scope=""col"">Points</th><th scope=""col"">Work item</th><th scope=""col"">Description</th>' +
-        '</tr></thead>' +
-        '<tbody>' + rows + '</tbody>' +
-        '</table>';
-
-      txStatus.textContent = 'Showing ' + data.length + ' transactions.';
-    } catch (e) {
-      txWrap.innerHTML = '';
-      txStatus.textContent = 'Could not load transactions: ' + e.message;
-    }
-  }
-
-  document.getElementById('transactionFilterForm').addEventListener('submit', function (e) {
-    e.preventDefault();
-    loadTransactions();
-  });
-
-  // ---------- Comment tester ----------
-  var testerForm = document.getElementById('testerForm');
-  var evaluateBtn = document.getElementById('evaluateBtn');
-  var resultBox = document.getElementById('resultBox');
-  var jsonResult = document.getElementById('jsonResult');
-
-  testerForm.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    evaluateBtn.disabled = true;
-    evaluateBtn.textContent = 'Evaluating...';
-
-    var payload = {
-      title: document.getElementById('title').value,
-      comment: document.getElementById('comment').value
-    };
-
-    try {
-      var res = await fetch('/api/test-score', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      var data = await res.json();
-
-      var passed = data.score >= 50;
-      resultBox.hidden = false;
-      resultBox.className = 'result-box ' + (passed ? 'pass' : 'fail');
-      resultBox.textContent = (passed ? '✅ Pass' : '❌ Fail') + ' — score ' + data.score + ' / 100';
-
-      jsonResult.hidden = false;
-      jsonResult.textContent = JSON.stringify(data, null, 2);
-    } catch (err) {
-      resultBox.hidden = false;
-      resultBox.className = 'result-box fail';
-      resultBox.textContent = 'Evaluation failed: ' + err.message;
-      jsonResult.hidden = true;
-    } finally {
-      evaluateBtn.disabled = false;
-      evaluateBtn.textContent = 'Evaluate comment';
-    }
-  });
-
-  // ---------- Init ----------
-  loadLeaderboard();
-  loadUserFilterOptions();
-  loadTransactions();
-})();
-</script>
-</body>
-</html>";
-
-	return Results.Content(html, "text/html");
+    return Results.Ok(users);
 });
+
+
+// ---------------------------------------------------------------------
+// Scoring rule toggles
+// ---------------------------------------------------------------------
+
+app.MapGet("/api/settings", async (AppDbContext db) =>
+{
+    var settings = await db.ScoringSettings.FirstOrDefaultAsync(s => s.Id == 1) ?? new ScoringSettings();
+
+    return Results.Ok(new
+    {
+        commentsEnabled = settings.CommentsEnabled,
+        completedWorkEnabled = settings.CompletedWorkEnabled,
+        remainingWorkEnabled = settings.RemainingWorkEnabled,
+        stateChangedEnabled = settings.StateChangedEnabled,
+        iterationChangedEnabled = settings.IterationChangedEnabled
+    });
+});
+
+app.MapPost("/api/settings", async (ScoringSettingsRequest req, AppDbContext db) =>
+{
+    var settings = await db.ScoringSettings.FirstOrDefaultAsync(s => s.Id == 1);
+    if (settings == null)
+    {
+        settings = new ScoringSettings { Id = 1 };
+        db.ScoringSettings.Add(settings);
+    }
+
+    settings.CommentsEnabled = req.CommentsEnabled;
+    settings.CompletedWorkEnabled = req.CompletedWorkEnabled;
+    settings.RemainingWorkEnabled = req.RemainingWorkEnabled;
+    settings.StateChangedEnabled = req.StateChangedEnabled;
+    settings.IterationChangedEnabled = req.IterationChangedEnabled;
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new
+    {
+        commentsEnabled = settings.CommentsEnabled,
+        completedWorkEnabled = settings.CompletedWorkEnabled,
+        remainingWorkEnabled = settings.RemainingWorkEnabled,
+        stateChangedEnabled = settings.StateChangedEnabled,
+        iterationChangedEnabled = settings.IterationChangedEnabled
+    });
+});
+
+app.MapGet("/dashboard", () => {return Results.File(Path.Combine(AppContext.BaseDirectory, "dashboard.html"), "text/html");});
+app.MapPost("/api/admin/run-eod", async (AppDbContext db, string? date) =>
+{
+    // Defaults to yesterday UTC if no date is provided
+    DateTime targetDate = string.IsNullOrWhiteSpace(date)
+        ? DateTime.UtcNow.Date.AddDays(-1)
+        : DateTime.Parse(date).Date;
+
+    await DailyMedalAwardBackgroundService.AwardDailyMedalsForDateAsync(db, targetDate);
+
+    return Results.Ok(new { message = $"Medals calculated for {targetDate:yyyy-MM-dd}" });
+});
+
+app.MapGet("/", async (AppDbContext db) =>
+        {
+            return Results.Redirect("dashboard");
+        }
+        );
 app.Run();
 
 
 
+static async Task<User> GetOrCreateUserAsync(AppDbContext db, string userName)
+{
+    var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == userName);
+    if (user != null)
+    {
+        return user;
+    }
 
+    user = new User { UserName = userName, Points = 0 };
+    db.Users.Add(user);
+
+    try
+    {
+        await db.SaveChangesAsync();
+        return user;
+    }
+    catch (DbUpdateException)
+    {
+        // Detach the failed duplicate entity so the context doesn't track it
+        db.Entry(user).State = EntityState.Detached;
+
+        // Fetch the user record successfully committed by the competing concurrent request
+        return await db.Users.FirstAsync(u => u.UserName == userName);
+    }
+}
 
 
 public class AppDbContext : DbContext
@@ -869,36 +620,95 @@ public class AppDbContext : DbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
     public DbSet<User> Users => Set<User>();
     public DbSet<PointTransaction> Transactions => Set<PointTransaction>();
+    public DbSet<ScoringSettings> ScoringSettings => Set<ScoringSettings>();
+    public DbSet<Medal> Medals => Set<Medal>();
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.UserName)
+            .IsUnique();
+    }
 }
 
 public class User
 {
-    public int Id{get; set;}
-    public required string UserName{get; set;}
-    public int Points {get; set;}
+    public int Id { get; set; }
+    public required string UserName { get; set; }
+    public int Points { get; set; }
 }
 public class PointTransaction
 {
-    public int Id {get; set;}
-    public int UserId {get; set;}
-    public User? User {get; set;}
-    public string? Type {get; set;}
-    public int DeltaPoints {get; set;}
-    public int? WorkItemId {get; set;}
-    public string? Description {get; set;}//maybe should add iteration?
-    public DateTime Timestamp {get; set;}
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public User? User { get; set; }
+    public string? Type { get; set; }
+    public int DeltaPoints { get; set; }
+    public int? WorkItemId { get; set; }
+    public string? Description { get; set; }//maybe should add iteration?
+    public DateTime Timestamp { get; set; }
+}
+
+//Daily commenter: Most points earned from comments that day
+//Daily warrior: Most points earned that day
+//Efsane get the daily warrior 5 days in a row
+//Orgeneral get the daily warrior 4 days in a row
+//Tumgeneral get the daily warrior 3 days in a row
+//Tuggeneral get the daily warrior 2 days in a row
+//Albay get the daily warrior once
+
+//Ordinaryus Profesor get the daily commenter 5 days in a row
+//Profesor Doktor get the daily commenter 4 days in a row
+//Docent doktor get the daily commenter 3 days in a row
+//Doktor get the daily commenter 2 days in a row
+//Ogretim Gorevlisi get the daily commenter once
+
+//v3: Get at least X points for 5 days
+//v6: Get at least X points for 15 days
+//v8: Get at least X points for 45 days
+//v10: Get at least X points for 90 days
+//v12: Get at least X points for 150 days
+
+public class Medal
+{
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public User? User { get; set; }
+    public string? Type { get; set; }
+    public string? Description { get; set; }
+    public DateTime Timestamp { get; set; }
+}
+// Single-row table of on/off switches for each scoring rule. Id is always 1.
+public class ScoringSettings
+{
+    public int Id { get; set; } = 1;
+    public bool CommentsEnabled { get; set; } = true;
+    public bool CompletedWorkEnabled { get; set; } = true;
+    public bool RemainingWorkEnabled { get; set; } = true;
+    public bool StateChangedEnabled { get; set; } = true;
+    public bool IterationChangedEnabled { get; set; } = true;
+}
+
+public class ScoringSettingsRequest
+{
+    public bool CommentsEnabled { get; set; } = true;
+    public bool CompletedWorkEnabled { get; set; } = true;
+    public bool RemainingWorkEnabled { get; set; } = true;
+    public bool StateChangedEnabled { get; set; } = true;
+    public bool IterationChangedEnabled { get; set; } = true;
 }
 
 public class TestCaseItem
 {
-	public string? title { get; set; }
-	public required string detail { get; set; }
-	public int? score { get; set; }
-	public float? accepted_score { get; set; }
-	public bool? accepted { get; set; }
+    public string? title { get; set; }
+    public required string detail { get; set; }
+    public int? score { get; set; }
+    public float? accepted_score { get; set; }
+    public bool? accepted { get; set; }
 }
 public class TestRequest
 {
-	public string? Title { get; set; }
-	public string Comment { get; set; } = string.Empty;
+    public string? Title { get; set; }
+    public string Comment { get; set; } = string.Empty;
 }
