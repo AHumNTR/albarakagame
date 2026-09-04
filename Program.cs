@@ -466,7 +466,12 @@ app.MapGet("/api/leaderboard", async (AppDbContext db, int page = 1, int pageSiz
     });
 });
 
-app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workItemId, int page = 1, int pageSize = 20) =>
+app.MapGet("/api/transactions", async (
+    AppDbContext db, 
+    string? user, 
+    string? workItemId, 
+    int page = 1, 
+    int pageSize = 20) =>
 {
     page = Math.Max(1, page);
     pageSize = Math.Clamp(pageSize, 1, 100);
@@ -479,8 +484,11 @@ app.MapGet("/api/transactions", async (AppDbContext db, string? user, int? workI
     if (!string.IsNullOrWhiteSpace(user))
         query = query.Where(t => t.User != null && t.User.UserName == user);
 
-    if (workItemId.HasValue)
-        query = query.Where(t => t.WorkItemId == workItemId);
+    // Safely parse workItemId only if a non-empty string was supplied
+    if (!string.IsNullOrWhiteSpace(workItemId) && int.TryParse(workItemId, out int parsedId))
+    {
+        query = query.Where(t => t.WorkItemId == parsedId);
+    }
 
     var totalCount = await query.CountAsync();
     var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);

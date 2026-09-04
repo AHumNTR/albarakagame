@@ -1,976 +1,358 @@
-    <!DOCTYPE html>
-<html lang="en">
+<!-- Save as: dashboard.html -->
+<!DOCTYPE html>
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Team Points Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>Puanlar & Liderlik</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="lib/azure-devops-extension-sdk/SDK.min.js"></script>
     <style>
-        :root {
-            --bg: #0f172a;
-            --card-bg: #1e293b;
-            --text: #f8fafc;
-            --muted: #94a3b8;
-            --border: #334155;
-            --accent: #6366f1;
-            --accent-hover: #818cf8;
-            --pass-bg: rgba(34, 197, 94, 0.1);
-            --pass-border: #22c55e;
-            --fail-bg: rgba(239, 68, 68, 0.1);
-            --fail-border: #ef4444;
-            --focus: #a5b4fc;
-            --font: 'Inter', system-ui, -apple-system, sans-serif;
-        }
-
-        * { box-sizing: border-box; }
-        
-        body {
-            font-family: var(--font);
-            max-width: 1100px;
-            margin: 0 auto;
-            padding: 40px 20px;
-            background: var(--bg);
-            color: var(--text);
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg); }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-
-        muted.modal-overlay[hidden] {
-            display: none !important;
-        }
-        .skip-link {
-            position: absolute;
-            left: -9999px;
-            top: 0;
-            background: var(--accent);
-            color: #fff;
-            padding: 10px 16px;
-            z-index: 100;
-            border-radius: 0 0 6px 0;
-        }
-        .skip-link:focus { left: 0; }
-
-        header { margin-bottom: 30px; }
-        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; color: #fff; letter-spacing: -0.025em; }
-        .subtitle { color: var(--muted); margin-top: 0; font-size: 1.05rem; }
-
-        .card {
-            background: var(--card-bg);
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -4px rgba(0,0,0,0.3);
-            border: 1px solid var(--border);
-        }
-
-        [role="tablist"] {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 24px;
-            border-bottom: 2px solid var(--border);
-            padding-bottom: 4px;
-            flex-wrap: wrap;
-        }
-
-        [role="tab"] {
-            background: transparent;
-            border: none;
-            padding: 12px 20px;
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--muted);
-            cursor: pointer;
-            border-radius: 8px;
-            transition: all 0.2s ease;
-        }
-
-        [role="tab"][aria-selected="true"] {
-            background: rgba(99, 102, 241, 0.1);
-            color: var(--accent-hover);
-        }
-
-        [role="tab"]:hover:not([aria-selected="true"]) {
-            color: var(--text);
-            background: rgba(255,255,255,0.05);
-        }
-
-        [role="tabpanel"][hidden] { display: none; }
-
-        a:focus-visible, button:focus-visible, input:focus-visible,
-        select:focus-visible, textarea:focus-visible, [role="tab"]:focus-visible {
-            outline: 2px solid var(--focus);
-            outline-offset: 2px;
-        }
-
-        table { 
-            width: 100%; 
-            border-collapse: separate; 
-            border-spacing: 0; 
-            margin-top: 20px; 
-        }
-        
-        caption { text-align: left; font-weight: 600; margin-bottom: 12px; color: var(--muted); }
-        
-        th, td { 
-            text-align: left; 
-            padding: 14px 16px; 
-            border-bottom: 1px solid var(--border); 
-            font-size: 0.95rem; 
-        }
-        
-        th { 
-            background: #0f172a; 
-            position: sticky; 
-            top: 0; 
-            font-weight: 600;
-            color: var(--muted);
-            text-transform: uppercase;
-            font-size: 0.8rem;
-            letter-spacing: 0.05em;
-        }
-        
-        th:first-child { border-top-left-radius: 8px; }
-        th:last-child { border-top-right-radius: 8px; }
-        
-        tbody tr { transition: background 0.15s; }
-        tbody tr:hover { background: rgba(255,255,255,0.03); }
-        
-        .rank-1 { font-weight: 700; color: #fbbf24; }
-        .points-positive { color: #34d399; font-weight: 600; }
-        .points-negative { color: #f87171; font-weight: 600; }
-        .points-zero { color: var(--muted); }
-
-        /* Medal Badges & Chips */
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            font-size: 0.75rem;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 999px;
-            margin-left: 6px;
-            vertical-align: middle;
-        }
-        .badge-warrior { 
-            background: rgba(239, 68, 68, 0.15); 
-            color: #f87171; 
-            border: 1px solid rgba(239, 68, 68, 0.3); 
-        }
-        .badge-commenter { 
-            background: rgba(99, 102, 241, 0.15); 
-            color: #a5b4fc; 
-            border: 1px solid rgba(99, 102, 241, 0.3); 
-        }
-        .badge-permanent { 
-            background: rgba(234, 179, 8, 0.15); 
-            color: #facc15; 
-            border: 1px solid rgba(234, 179, 8, 0.3); 
-            cursor: pointer; 
-        }
-
-        .user-link {
-            color: var(--text);
-            text-decoration: none;
-            cursor: pointer;
-            font-weight: 600;
-        }
-        .user-link:hover {
-            color: var(--accent-hover);
-            text-decoration: underline;
-        }
-
-        .filters { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 20px; align-items: end; }
-        .form-group { margin-bottom: 16px; }
-        .flex-row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 10px; }
-        .flex-row .form-group { flex: 1; min-width: 200px; margin-bottom: 0; }
-        
-        label { 
-            display: block; 
-            font-weight: 500; 
-            margin-bottom: 8px; 
-            font-size: 0.9rem;
-            color: var(--muted);
-        }
-        
-        input, textarea, select {
-            width: 100%;
-            padding: 12px 14px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            font-size: 1rem;
-            background: #0f172a;
-            color: var(--text);
-            font-family: inherit;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        
-        input:focus, textarea:focus, select:focus {
-            border-color: var(--accent);
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
-        }
-
-        button.action, .btn-secondary {
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            padding: 10px 18px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 0.95rem;
-            font-weight: 600;
-            transition: background 0.2s, transform 0.1s;
-        }
-
-        .btn-secondary { background: #334155; }
-        button.action:hover { background: var(--accent-hover); }
-        .btn-secondary:hover { background: #475569; }
-        button:active { transform: translateY(1px); }
-        button:disabled, .btn-secondary:disabled {
-            background: #1e293b;
-            color: var(--muted);
-            border: 1px solid var(--border);
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Pagination Bar */
-        .pagination-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 16px;
-            margin-top: 20px;
-            padding-top: 16px;
-            border-top: 1px solid var(--border);
-        }
-        .pagination-actions {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .pagination-page-info {
-            font-size: 0.9rem;
-            color: var(--muted);
-        }
-
-        pre {
-            background: #0f172a;
-            color: #cbd5e1;
-            padding: 20px;
-            border-radius: 8px;
-            overflow-x: auto;
-            font-size: 0.9rem;
-            border: 1px solid var(--border);
-        }
-        
-        .result-box {
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin-top: 24px;
-            padding: 16px 20px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        
-        .result-box.pass { background: var(--pass-bg); color: var(--pass-border); border: 1px solid rgba(34, 197, 94, 0.3); }
-        .result-box.fail { background: var(--fail-bg); color: var(--fail-border); border: 1px solid rgba(239, 68, 68, 0.3); }
-        
-        .visually-hidden {
-            position: absolute;
-            width: 1px; height: 1px;
-            margin: -1px; padding: 0; border: 0;
-            clip: rect(0 0 0 0);
-            overflow: hidden;
-            white-space: nowrap;
-        }
-        
-        .status-line { color: var(--muted); font-size: 0.9rem; margin-top: 8px; }
-        .empty-state { color: var(--muted); font-style: italic; padding: 24px 0; text-align: center; }
-
-        /* Toggles */
-        .toggle-list { display: flex; flex-direction: column; gap: 4px; margin-top: 16px; }
-        .toggle-row {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 20px;
-            padding: 16px 4px;
-            border-bottom: 1px solid var(--border);
-        }
-        .toggle-row:last-child { border-bottom: none; }
-        .toggle-text { flex: 1; }
-        .toggle-title { display: block; font-weight: 600; color: var(--text); font-size: 1rem; margin-bottom: 4px; }
-        .toggle-desc { display: block; color: var(--muted); font-size: 0.88rem; }
-
-        .switch {
-            position: relative;
-            display: inline-block;
-            width: 46px;
-            height: 26px;
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
-        .switch input {
-            appearance: none;
-            -webkit-appearance: none;
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            cursor: pointer;
-            background: var(--border);
-            border-radius: 999px;
-            border: none;
-            transition: background 0.2s ease;
-        }
-        .switch input::before {
-            content: '';
-            position: absolute;
-            top: 3px;
-            left: 3px;
-            width: 20px;
-            height: 20px;
-            background: #fff;
-            border-radius: 50%;
-            transition: transform 0.2s ease;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-        }
-        .switch input:checked { background: var(--accent); }
-        .switch input:checked::before { transform: translateX(20px); }
-        .switch input:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
-        .switch input:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        /* Modal Popup */
-        .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(4px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            padding: 20px;
-        }
-        .modal-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            width: 100%;
-            max-width: 520px;
-            max-height: 80vh;
-            overflow-y: auto;
-            padding: 24px;
-            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5);
-        }
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 14px;
-            margin-bottom: 16px;
-        }
-        .modal-close {
-            background: transparent;
-            border: none;
-            color: var(--muted);
-            font-size: 1.5rem;
-            cursor: pointer;
-            line-height: 1;
-        }
-        .modal-close:hover { color: #fff; }
-        .medal-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            padding: 12px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            margin-bottom: 8px;
-            background: rgba(15, 23, 42, 0.4);
-        }
-        .medal-icon { font-size: 1.5rem; line-height: 1; }
-        .medal-details strong { display: block; color: #fff; font-size: 0.95rem; }
-        .medal-details span { display: block; color: var(--muted); font-size: 0.85rem; }
-
-        @media (prefers-reduced-motion: reduce) {
-            * { animation: none !important; transition: none !important; }
-        }
+        :root{--bg:#090d16;--card:#101626;--sub:#161e33;--sub2:#1a233b;--border:#1e2942;--text:#f1f5f9;--muted:#8492a6;--green:#10b981;--purp:#8b5cf6;--gold:#fbbf24;--blue:#3b82f6;--red:#ef4444}
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;padding:20px;line-height:1.4}
+        .flex{display:flex}.col{flex-direction:column}.ac{align-items:center}.jb{justify-content:space-between}.g4{gap:4px}.g8{gap:8px}.g12{gap:12px}.g16{gap:16px}
+        .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+        .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px}
+        .pill-box{background:var(--sub);border-radius:8px;padding:3px;display:flex;gap:3px}
+        .pill-btn{flex:1;background:none;border:none;color:var(--muted);font:600 .75rem inherit;padding:6px 10px;border-radius:6px;cursor:pointer;transition:.15s}
+        .pill-btn:hover{color:#fff}
+        .pill-btn.active{background:var(--green);color:#064e3b;font-weight:700}
+        .badge{font-size:.65rem;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+        .b-war{background:rgba(239,68,68,.15);color:#f87171}
+        .b-com{background:rgba(99,102,241,.15);color:#a5b4fc}
+        .badge-card{background:var(--sub);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;cursor:pointer;transition:.15s}
+        .badge-card:hover{border-color:var(--blue);transform:translateY(-1px)}
+        .row-item{background:var(--sub);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:.82rem;cursor:pointer;transition:.15s}
+        .row-item:hover{background:var(--sub2)}
+        .row-item.me{background:rgba(139,92,246,.08);border-color:var(--purp)}
+        .sen-tag{background:#4c1d95;color:#ddd6fe;font-size:.6rem;padding:1px 4px;border-radius:3px;font-weight:700;margin-left:4px}
+        .details-bar{width:100%;background:var(--sub);border:none;color:#fff;padding:12px 18px;cursor:pointer;font:600 .85rem inherit;border-radius:14px}
+        .log-box{background:var(--sub);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:.8rem}
+        .log-code{background:rgba(15,23,42,.6);border-left:2px solid var(--blue);padding:6px 10px;color:#93c5fd;font-family:monospace;font-size:.75rem;border-radius:4px}
+        .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+        .stat-card{background:var(--sub);border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center}
+        .modal{position:fixed;inset:0;background:rgba(9,13,22,.85);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:99;padding:16px}
+        .modal[hidden]{display:none!important}
+        .modal-body{background:var(--card);border:1px solid var(--border);border-radius:14px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;padding:20px}
+        .modal-item{background:var(--sub);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:.8rem;margin-bottom:4px}
     </style>
 </head>
 <body>
-    <a class="skip-link" href="#main">Skip to main content</a>
+    <div class="flex jb ac" style="margin-bottom:16px;">
+        <div class="flex ac g8"><span style="color:#f59e0b;font-size:1.2rem;">⚡</span><div><h2 style="font-size:1.1rem;">Puanlar</h2><span style="font-size:.72rem;color:var(--muted)">2026 18.iterasyon</span></div></div>
+        <button id="btnRefresh" title="Yenile" style="background:var(--sub);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:6px 10px;cursor:pointer">↻</button>
+    </div>
 
-    <header>
-        <h1>Team Points Dashboard</h1>
-        <p class="subtitle">Leaderboard, point transaction history, the comment scorer tester, and scoring rule toggles.</p>
-    </header>
+    <div class="grid" style="margin-bottom:16px;">
+        <!-- Left Column: User Profile -->
+        <div class="card flex col g16">
+            <div class="flex ac g12">
+                <div id="uRank" style="background:var(--gold);color:#0f172a;font-weight:800;font-size:1rem;padding:6px 12px;border-radius:8px">#--</div>
+                <div><h3 id="uName" style="font-size:1.1rem">Kullanıcı</h3><span id="uSub" style="font-size:.75rem;color:var(--muted)">Bugün 0p · 0.0h</span></div>
+            </div>
 
-    <main id="main" class="card">
-        <div role="tablist" aria-label="Dashboard sections">
-            <button role="tab" id="tab-leaderboard" aria-controls="panel-leaderboard" aria-selected="true" tabindex="0">Leaderboard</button>
-            <button role="tab" id="tab-transactions" aria-controls="panel-transactions" aria-selected="false" tabindex="-1">Transactions</button>
-            <button role="tab" id="tab-tester" aria-controls="panel-tester" aria-selected="false" tabindex="-1">Comment Tester</button>
-            <button role="tab" id="tab-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">Scoring Rules</button>
+            <!-- Scope Filter Buttons -->
+            <div class="pill-box" id="scopeButtons">
+                <button class="pill-btn active" data-scope="Tüm Şirket">Tüm şirket</button>
+                <button class="pill-btn" data-scope="Ekip">Ekip</button>
+            </div>
+
+            <!-- Timeframe Filter Buttons -->
+            <div class="pill-box" id="timeframeButtons">
+                <button class="pill-btn active" data-tf="all">Tüm zamanlar</button>
+                <button class="pill-btn" data-tf="today">Bugün</button>
+                <button class="pill-btn" data-tf="week">Son 7 gün</button>
+                <button class="pill-btn" data-tf="sprint">Bu sprint</button>
+            </div>
+
+            <div style="text-align:center">
+                <div id="uPoints" style="font-size:3rem;font-weight:800;color:var(--green);line-height:1">0</div>
+                <div id="uScopeLabel" style="font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-top:4px">Tüm Şirket · Tüm Zamanlar</div>
+            </div>
+
+            <div class="flex jb ac" style="background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:10px 14px;color:var(--green);font-size:.78rem;font-weight:600">
+                <span>2026 18.iterasyon</span><span id="uSprintPts">0p · #-</span>
+            </div>
+
+            <div>
+                <span style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:8px">Rozetler</span>
+                <div id="badgeGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px"></div>
+            </div>
         </div>
 
-        <!-- PANEL: LEADERBOARD -->
-        <section id="panel-leaderboard" role="tabpanel" aria-labelledby="tab-leaderboard" tabindex="0">
-            <div class="filters">
-                <div class="form-group" style="margin-bottom:0;">
-                    <label for="leaderboardPageSize">Page size</label>
-                    <select id="leaderboardPageSize" style="width:auto;">
-                        <option value="10">10 per page</option>
-                        <option value="15" selected>15 per page</option>
-                        <option value="25">25 per page</option>
-                        <option value="50">50 per page</option>
-                    </select>
-                </div>
-                <button class="action" id="refreshLeaderboardBtn" type="button">Refresh Leaderboard</button>
-            </div>
-            <p id="leaderboardStatus" class="status-line" role="status" aria-live="polite"></p>
-            <div id="leaderboardTableWrap"></div>
-            <div id="leaderboardPagination" class="pagination-bar" hidden>
-                <span id="leaderboardPageInfo" class="pagination-page-info"></span>
-                <div class="pagination-actions">
-                    <button type="button" class="btn-secondary" id="leaderboardPrevBtn">&larr; Previous</button>
-                    <button type="button" class="btn-secondary" id="leaderboardNextBtn">Next &rarr;</button>
+        <!-- Right Column: Leaderboard -->
+        <div class="card flex col">
+            <div class="flex jb ac" style="margin-bottom:12px">
+                <span style="font-size:.75rem;font-weight:700;color:var(--muted);text-transform:uppercase">Sıralama</span>
+                <div class="flex g8 ac">
+                    <span id="lbFilterTag" style="background:rgba(16,185,129,.1);color:var(--green);border-radius:99px;padding:3px 10px;font-size:.68rem;font-weight:600">Tüm şirket - Tüm zamanlar</span>
+                    <span id="totalUsers" style="background:var(--sub);border:1px solid var(--border);color:var(--muted);border-radius:6px;padding:3px 8px;font-size:.68rem">0 kişi</span>
                 </div>
             </div>
-        </section>
+            <div id="rankList" class="flex col g4"></div>
+        </div>
+    </div>
 
-        <!-- PANEL: TRANSACTIONS -->
-        <section id="panel-transactions" role="tabpanel" aria-labelledby="tab-transactions" tabindex="0" hidden>
-            <form id="transactionFilterForm">
-                <div class="flex-row">
-                    <div class="form-group">
-                        <label for="txUserFilter">Filter by user</label>
-                        <select id="txUserFilter">
-                            <option value="">All users</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="txWorkItemFilter">Filter by work item ID</label>
-                        <input type="number" id="txWorkItemFilter" placeholder="e.g. 4213" min="0" />
-                    </div>
-                    <div class="form-group">
-                        <label for="txPageSize">Page size</label>
-                        <select id="txPageSize">
-                            <option value="15">15 rows</option>
-                            <option value="25" selected>25 rows</option>
-                            <option value="50">50 rows</option>
-                            <option value="100">100 rows</option>
-                        </select>
-                    </div>
-                </div>
-                <button class="action" type="submit">Apply Filters</button>
-            </form>
-            <p id="transactionsStatus" class="status-line" role="status" aria-live="polite"></p>
-            <div id="transactionsTableWrap"></div>
-            <div id="txPagination" class="pagination-bar" hidden>
-                <span id="txPageInfo" class="pagination-page-info"></span>
-                <div class="pagination-actions">
-                    <button type="button" class="btn-secondary" id="txPrevBtn">&larr; Previous</button>
-                    <button type="button" class="btn-secondary" id="txNextBtn">Next &rarr;</button>
-                </div>
+    <!-- Collapsible Details / History Panel -->
+    <div style="border:1px solid var(--border);border-radius:14px;background:var(--card);overflow:hidden">
+        <button id="btnToggleDetails" class="details-bar flex jb ac"><span id="txtToggle">Detayları göster</span><span id="arrToggle">▼</span></button>
+        <div id="secDetails" style="padding:16px;display:flex;flex-direction:column;gap:12px" hidden>
+            <!-- Detail Sub-tabs -->
+            <div class="flex g8" id="detailTabs">
+                <button class="pill-btn active" data-tab="history" style="background:var(--sub);border:1px solid var(--green);color:#fff;flex:1">Geçmiş</button>
+                <button class="pill-btn" data-tab="stats" style="background:var(--sub);border:1px solid var(--border);flex:1">İstatistik</button>
+                <button class="pill-btn" data-tab="rejected" style="background:var(--sub);border:1px solid var(--border);flex:1">Reddedilen</button>
+                <button class="pill-btn" data-tab="help" style="background:var(--sub);border:1px solid var(--border);flex:1">Yardım</button>
             </div>
-        </section>
+            <div id="detailViewWrap" class="flex col g8"></div>
+        </div>
+    </div>
 
-        <!-- PANEL: TESTER -->
-        <section id="panel-tester" role="tabpanel" aria-labelledby="tab-tester" tabindex="0" hidden>
-            <form id="testerForm">
-                <div class="form-group">
-                    <label for="title">Work item title</label>
-                    <input type="text" id="title" name="title" value="Veritabani yeni semaya gecis" />
-                </div>
-
-                <div class="form-group">
-                    <label for="comment">Developer comment</label>
-                    <textarea id="comment" name="comment" rows="4">Eski transaction tablosundaki indeksler yeni kolon yapisina gore revize edildi.</textarea>
-                </div>
-
-                <button class="action" type="submit" id="evaluateBtn">Evaluate Comment</button>
-            </form>
-
-            <div id="resultBox" class="result-box" hidden role="status" aria-live="polite"></div>
-            <h2 class="visually-hidden">Raw evaluation response</h2>
-            <pre id="jsonResult" hidden></pre>
-        </section>
-
-        <!-- PANEL: SETTINGS -->
-        <section id="panel-settings" role="tabpanel" aria-labelledby="tab-settings" tabindex="0" hidden>
-            <p class="status-line">Turn a rule off to stop granting new points for that action. Points already awarded are not taken back, and turning a rule back on does not retroactively award anything that was missed.</p>
-
-            <div class="toggle-list">
-                <div class="toggle-row">
-                    <div class="toggle-text">
-                        <span class="toggle-title" id="label-comments">Comment points</span>
-                        <span class="toggle-desc">Points for the first meaningful comment an assignee leaves on their own work item.</span>
-                    </div>
-                    <span class="switch">
-                        <input type="checkbox" id="toggle-comments" role="switch" aria-labelledby="label-comments" />
-                    </span>
-                </div>
-                <div class="toggle-row">
-                    <div class="toggle-text">
-                        <span class="toggle-title" id="label-completed-work">Completed work points</span>
-                        <span class="toggle-desc">Points when the assignee logs completed work on their own item in the current iteration.</span>
-                    </div>
-                    <span class="switch">
-                        <input type="checkbox" id="toggle-completed-work" role="switch" aria-labelledby="label-completed-work" />
-                    </span>
-                </div>
-                <div class="toggle-row">
-                    <div class="toggle-text">
-                        <span class="toggle-title" id="label-remaining-work">Remaining work points</span>
-                        <span class="toggle-desc">Points when the assignee reduces remaining work on their own item in the current iteration.</span>
-                    </div>
-                    <span class="switch">
-                        <input type="checkbox" id="toggle-remaining-work" role="switch" aria-labelledby="label-remaining-work" />
-                    </span>
-                </div>
-                <div class="toggle-row">
-                    <div class="toggle-text">
-                        <span class="toggle-title" id="label-state-changed">Closing points</span>
-                        <span class="toggle-desc">Points when the assignee closes their own item in the current iteration after logging work today.</span>
-                    </div>
-                    <span class="switch">
-                        <input type="checkbox" id="toggle-state-changed" role="switch" aria-labelledby="label-state-changed" />
-                    </span>
-                </div>
-                <div class="toggle-row">
-                    <div class="toggle-text">
-                        <span class="toggle-title" id="label-iteration-changed">Iteration change adjustment</span>
-                        <span class="toggle-desc">Revokes points already earned on a task when it is moved out of the current iteration.</span>
-                    </div>
-                    <span class="switch">
-                        <input type="checkbox" id="toggle-iteration-changed" role="switch" aria-labelledby="label-iteration-changed" />
-                    </span>
-                </div>
+    <!-- Modal Trophy Cabinet -->
+    <div id="userModal" class="modal" hidden onclick="if(event.target===this)closeModal()">
+        <div class="modal-body">
+            <div class="flex jb ac" style="border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:14px">
+                <div><h3 id="mName" style="font-size:1.05rem"></h3><span id="mPts" style="font-size:.75rem;color:var(--green);font-weight:700"></span></div>
+                <button onclick="closeModal()" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer">&times;</button>
             </div>
-
-            <p id="settingsStatus" class="status-line" role="status" aria-live="polite"></p>
-        </section>
-    </main>
-
-    <!-- USER MEDAL PROFILE MODAL -->
-    <div id="userModal" class="modal-overlay" hidden>
-        <div class="modal-card">
-            <div class="modal-header">
-                <div>
-                    <h2 id="modalUserName" style="margin:0; font-size:1.3rem;"></h2>
-                    <span id="modalUserPoints" style="color:var(--muted); font-size:0.9rem;"></span>
-                </div>
-                <button class="modal-close" id="closeModalBtn" aria-label="Close modal">&times;</button>
-            </div>
-            <h3 style="font-size:1rem; color:var(--muted); margin-bottom:12px;">Earned Medals & Trophies</h3>
-            <div id="modalMedalsList"></div>
+            <div id="mContent"></div>
         </div>
     </div>
 
     <script>
-    (function () {
-        // ---------- Tab logic ----------
-        var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
-        var panels = tabs.map(function (t) { return document.getElementById(t.getAttribute('aria-controls')); });
+    (function(){
+        if(typeof SDK!=="undefined"){SDK.init({applyTheme:true});SDK.ready().then(()=>SDK.notifyLoadSucceeded());}
 
-        function selectTab(index) {
-            tabs.forEach(function (t, i) {
-                var selected = i === index;
-                t.setAttribute('aria-selected', selected ? 'true' : 'false');
-                t.tabIndex = selected ? 0 : -1;
-                panels[i].hidden = !selected;
+        const R={mil:['Albay','Tuğgeneral','Tümgeneral','Orgeneral','Efsane'],acad:['Öğretim Görevlisi','Doktor','Doçent Doktor','Profesör Doktor','Ordinaryüs Profesör'],v:['v3','v6','v8','v10','v12']};
+        const I={mil:'⚔️',acad:'🎓',v:'🏆',w:'🗡️',c:'💬',def:'🎯'};
+        const getIcon=t=>!t?I.def:R.mil.includes(t)?I.mil:R.acad.includes(t)?I.acad:R.v.includes(t)?I.v:t.includes('Warrior')?I.w:t.includes('Commenter')?I.c:I.def;
+        const mask=n=>n.split(' ').map(p=>p.length<=1?p:p[0]+'***').join(' ');
+
+        let users=[], allTransactions=[], me=null, currentScope="Tüm Şirket", currentTimeframe="all", activeDetailTab="history";
+
+        function getBestMedals(list=[]){
+            let r=[];
+            ['mil','acad','v'].forEach(k=>{
+                let max=-1,m=null;
+                list.forEach(x=>{let i=R[k].indexOf(x.type);if(i>max){max=i;m=x;}});
+                if(m)r.push(m);
             });
-            tabs[index].focus();
+            return r;
         }
 
-        tabs.forEach(function (tab, i) {
-            tab.addEventListener('click', function () { selectTab(i); });
-            tab.addEventListener('keydown', function (e) {
-                var newIndex = null;
-                if (e.key === 'ArrowRight') newIndex = (i + 1) % tabs.length;
-                else if (e.key === 'ArrowLeft') newIndex = (i - 1 + tabs.length) % tabs.length;
-                else if (e.key === 'Home') newIndex = 0;
-                else if (e.key === 'End') newIndex = tabs.length - 1;
-                if (newIndex !== null) {
-                    e.preventDefault();
-                    selectTab(newIndex);
-                }
-            });
+        function getDailyCounts(list=[]){
+            return list.reduce((a,m)=>{if(m.type==='Daily Warrior'||m.type==='Daily Commenter')a[m.type]=(a[m.type]||0)+1;return a;},{});
+        }
+
+        // ---------- Timeframe & Points Calculation ----------
+        function updatePointsDisplay(){
+            if(!me) return;
+            const now = new Date();
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const sevenDaysAgo = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+
+            let pts = me.points;
+            let tfLabel = "Tüm Zamanlar";
+
+            const myTx = allTransactions.filter(t => t.userName === me.userName);
+
+            if(currentTimeframe === "today"){
+                pts = myTx.filter(t => new Date(t.timestamp).getTime() >= startOfToday).reduce((s, t) => s + (t.deltaPoints || 0), 0);
+                tfLabel = "Bugün";
+            } else if(currentTimeframe === "week"){
+                pts = myTx.filter(t => new Date(t.timestamp).getTime() >= sevenDaysAgo).reduce((s, t) => s + (t.deltaPoints || 0), 0);
+                tfLabel = "Son 7 Gün";
+            } else if(currentTimeframe === "sprint"){
+                pts = me.points; // Active sprint points
+                tfLabel = "Bu Sprint";
+            }
+
+            document.getElementById('uPoints').innerText = pts;
+            document.getElementById('uScopeLabel').innerText = `${currentScope} · ${tfLabel}`;
+            document.getElementById('lbFilterTag').innerText = `${currentScope} - ${tfLabel}`;
+        }
+
+        // Wire Scope Buttons
+        document.querySelectorAll('#scopeButtons .pill-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('#scopeButtons .pill-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentScope = btn.dataset.scope;
+                updatePointsDisplay();
+            };
         });
 
-        // ---------- Helpers ----------
-        function escapeHtml(str) {
-            if (str === null || str === undefined) return '';
-            return String(str)
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/"/g, '&quot;');
+        // Wire Timeframe Buttons
+        document.querySelectorAll('#timeframeButtons .pill-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('#timeframeButtons .pill-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentTimeframe = btn.dataset.tf;
+                updatePointsDisplay();
+            };
+        });
+
+        // ---------- Leaderboard Loader ----------
+        async function loadLb(){
+            const res = await fetch('/api/leaderboard?page=1&pageSize=100');
+            if(!res.ok) return;
+            const d = await res.json();
+            users = d.items || [];
+            document.getElementById('totalUsers').innerText = `${d.totalCount || users.length} kişi`;
+            if(!users.length) return;
+
+            me = users[0];
+            document.getElementById('uRank').innerText = `#1`;
+            document.getElementById('uName').innerText = me.userName;
+            document.getElementById('uSprintPts').innerText = `${me.points}p · #1`;
+
+            // Calculate Today's Stats for header
+            const now = new Date();
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const todayPts = allTransactions.filter(t => t.userName === me.userName && new Date(t.timestamp).getTime() >= startOfToday).reduce((s, t) => s + (t.deltaPoints || 0), 0);
+            document.getElementById('uSub').innerText = `Bugün ${todayPts}p · ${(todayPts * 0.125).toFixed(1)}h`;
+
+            updatePointsDisplay();
+
+            // Render Rozetler
+            const best = getBestMedals(me.medals), daily = getDailyCounts(me.medals);
+            let bHtml = best.map(m => `<div class="badge-card" onclick="openModal(${me.id})"><div style="font-size:1.3rem">${getIcon(m.type)}</div><strong style="font-size:.72rem;display:block;margin-top:4px">${m.type}</strong></div>`).join('');
+            bHtml += Object.entries(daily).map(([t, c]) => `<div class="badge-card" onclick="openModal(${me.id})"><div style="font-size:1.3rem">${t.includes('Warrior')?I.w:I.c}</div><strong style="font-size:.72rem;display:block;margin-top:4px">${t} &times;${c}</strong></div>`).join('');
+            document.getElementById('badgeGrid').innerHTML = bHtml || `<div class="badge-card" onclick="openModal(${me.id})"><div style="font-size:1.3rem">🎯</div><strong style="font-size:.72rem;display:block;margin-top:4px">İlk Adım</strong></div>`;
+
+            // Render Right Leaderboard
+            const top5 = users.slice(0, 5), bot5 = users.length > 10 ? users.slice(-5) : [];
+            let lHtml = top5.map((u, i) => buildRow(u, i + 1, u.id === me.id)).join('');
+            if(users.length > 5) lHtml += `<div style="text-align:center;color:var(--muted);font-weight:bold;letter-spacing:2px;padding:4px 0">···</div>`;
+            if(bot5.length){
+                lHtml += `<span style="font-size:.65rem;font-weight:700;color:var(--muted);margin:4px 0">Son 5</span>` + bot5.map((u, i) => buildRow(u, users.length - 5 + i + 1, u.id === me.id)).join('');
+            }
+            document.getElementById('rankList').innerHTML = lHtml;
         }
 
-        function pointsClass(n) {
-            if (n > 0) return 'points-positive';
-            if (n < 0) return 'points-negative';
-            return 'points-zero';
+        function buildRow(u, rank, isMe){
+            const rTxt = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank;
+            const chips = (u.dailyBadges || []).map(b => `<span class="badge ${b.includes('Warrior')?'b-war':'b-com'}">${b.includes('Warrior')?'⚔️ Warrior':'💬 Commenter'}</span>`).join('');
+            return `<div class="row-item flex jb ac ${isMe?'me':''}" onclick="openModal(${u.id})">
+                <div class="flex ac g12"><span style="width:20px;text-align:center;font-weight:700;color:var(--muted)">${rTxt}</span>
+                    <div class="flex col"><span style="font-weight:600">${isMe ? u.userName : mask(u.userName)}${isMe ? '<span class="sen-tag">SEN</span>' : ''}</span>
+                    ${isMe ? '<span style="font-size:.62rem;color:#a78bfa">MÜDÜR · AlbarakaTech</span>' : ''}</div>
+                </div>
+                <div class="flex ac g8"><div class="flex col g4" style="align-items:flex-end">${chips}</div><span style="font-weight:700;color:var(--green);min-width:40px;text-align:right">${u.points}p</span></div>
+            </div>`;
         }
 
-        function formatTimestamp(ts) {
-            try {
-                return new Date(ts).toLocaleString();
-            } catch (e) {
-                return ts;
+        // ---------- Details Panel Tabs & Data Rendering ----------
+        async function fetchTx(){
+            const res = await fetch('/api/transactions?page=1&pageSize=100');
+            if(!res.ok) return;
+            const d = await res.json();
+            allTransactions = d.items || [];
+        }
+
+        function renderDetailTab(){
+            const wrap = document.getElementById('detailViewWrap');
+            if(activeDetailTab === "history"){
+                wrap.innerHTML = allTransactions.map(t => `
+                    <div class="log-box">
+                        <div class="flex ac g8"><span style="color:var(--green);font-weight:700">${t.deltaPoints > 0 ? '+' : ''}${t.deltaPoints}</span><strong>${t.type === 'Remaining Work Updated' ? 'Remaining Work azaldı (1s=1p, max 8/gün)' : 'Completed Work arttı (1s=1p, max 8/gün)'}</strong></div>
+                        <span style="color:var(--muted)">${t.description || 'İşlem tamamlandı'}</span>
+                        <div class="log-code">${t.type === 'Remaining Work Updated' ? '-1.0h RW' : '+1.0h CW'}</div>
+                        <span style="font-size:.68rem;color:var(--muted)">#${t.workItemId || '0000000'} · ${new Date(t.timestamp).toLocaleDateString('tr-TR')}</span>
+                    </div>`).join('') || '<p style="color:var(--muted);text-align:center;padding:12px;">Kayıt yok.</p>';
+            } else if(activeDetailTab === "stats"){
+                const commentPts = allTransactions.filter(t => t.type === 'Comment Added').reduce((s, t) => s + (t.deltaPoints || 0), 0);
+                const cwPts = allTransactions.filter(t => t.type === 'Completed Work Updated').reduce((s, t) => s + (t.deltaPoints || 0), 0);
+                const rwPts = allTransactions.filter(t => t.type === 'Remaining Work Updated').reduce((s, t) => s + (t.deltaPoints || 0), 0);
+                wrap.innerHTML = `
+                    <div class="stat-grid">
+                        <div class="stat-card"><span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;">Toplam Puan</span><div style="font-size:1.4rem;font-weight:800;color:var(--green);">${me ? me.points : 0}</div></div>
+                        <div class="stat-card"><span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;">Yorum Puanları</span><div style="font-size:1.4rem;font-weight:800;color:var(--blue);">${commentPts}p</div></div>
+                        <div class="stat-card"><span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;">Completed Work</span><div style="font-size:1.4rem;font-weight:800;color:var(--purp);">${cwPts}p</div></div>
+                        <div class="stat-card"><span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;">Remaining Work</span><div style="font-size:1.4rem;font-weight:800;color:var(--gold);">${rwPts}p</div></div>
+                        <div class="stat-card"><span style="font-size:.7rem;color:var(--muted);text-transform:uppercase;">Toplam Kayıt</span><div style="font-size:1.4rem;font-weight:800;color:#fff;">${allTransactions.length}</div></div>
+                    </div>`;
+            } else if(activeDetailTab === "rejected"){
+                const rejected = allTransactions.filter(t => t.deltaPoints <= 0 || (t.description && (t.description.includes('disabled') || t.description.includes('revoking') || t.description.includes('no points'))));
+                wrap.innerHTML = rejected.length ? rejected.map(t => `
+                    <div class="log-box" style="border-color:rgba(239,68,68,.3);">
+                        <div class="flex ac g8"><span style="color:var(--red);font-weight:700">${t.deltaPoints}p</span><strong style="color:#fca5a5;">${t.type}</strong></div>
+                        <span style="color:var(--muted);">${t.description || 'Puan kriteri karşılanmadı.'}</span>
+                        <span style="font-size:.68rem;color:var(--muted)">#${t.workItemId || '—'} · ${new Date(t.timestamp).toLocaleDateString('tr-TR')}</span>
+                    </div>`).join('') : '<p style="color:var(--muted);text-align:center;padding:12px;">Reddedilen veya sıfır puanlı işlem yok.</p>';
+            } else if(activeDetailTab === "help"){
+                wrap.innerHTML = `
+                    <div class="flex col g8" style="font-size:.8rem;color:var(--muted);">
+                        <div class="log-box"><strong style="color:#fff;">⏱️ Completed Work</strong>Her 1 saatlik tamamlanan iş için +1p kazanılır (Maksimum 8p / gün).</div>
+                        <div class="log-box"><strong style="color:#fff;">📉 Remaining Work</strong>Kalan iş saatini her 1 saat düşürdüğünüzde +1p kazanırsınız (Maksimum 8p / gün).</div>
+                        <div class="log-box"><strong style="color:#fff;">💬 Anlamlı Yorum</strong>Göreve yazılan ilk anlamlı teknik yorum AI tarafından puanlanır (50 puana kadar).</div>
+                        <div class="log-box"><strong style="color:#fff;">🎖️ Rütbe & Rozetler</strong>Günlük en çok puan toplayanlar Daily Warrior / Daily Commenter olur; ardışık günlerde askeri ve akademik rütbelere terfi ederler.</div>
+                    </div>`;
             }
         }
 
-        function getMedalIcon(type) {
-            if (!type) return '🎖️';
-            if (['Albay', 'Tuğgeneral', 'Tümgeneral', 'Orgeneral', 'Efsane'].indexOf(type) !== -1) return '⭐';
-            if (['Öğretim Görevlisi', 'Doktor', 'Doçent Doktor', 'Profesör Doktor', 'Ordinaryüs Profesör'].indexOf(type) !== -1) return '🎓';
-            if (type.indexOf('v') === 0) return '🏆';
-            if (type.indexOf('Warrior') !== -1) return '⚔️';
-            if (type.indexOf('Commenter') !== -1) return '💬';
-            return '🎖️';
-        }
+        // Wire Details Sub-tabs
+        document.querySelectorAll('#detailTabs .pill-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll('#detailTabs .pill-btn').forEach(b => {
+                    b.classList.remove('active');
+                    b.style.borderColor = "var(--border)";
+                    b.style.color = "var(--muted)";
+                });
+                btn.classList.add('active');
+                btn.style.borderColor = "var(--green)";
+                btn.style.color = "#fff";
+                activeDetailTab = btn.dataset.tab;
+                renderDetailTab();
+            };
+        });
 
-        // ---------- Leaderboard Pagination & Badges ----------
-        var lbState = { page: 1, pageSize: 15, totalPages: 1, totalCount: 0 };
-        var currentUsersData = [];
-        var leaderboardWrap = document.getElementById('leaderboardTableWrap');
-        var leaderboardStatus = document.getElementById('leaderboardStatus');
-        var leaderboardPagination = document.getElementById('leaderboardPagination');
-        var leaderboardPageInfo = document.getElementById('leaderboardPageInfo');
-        var leaderboardPrevBtn = document.getElementById('leaderboardPrevBtn');
-        var leaderboardNextBtn = document.getElementById('leaderboardNextBtn');
-        var leaderboardPageSize = document.getElementById('leaderboardPageSize');
-
-        async function loadLeaderboard(targetPage) {
-            if (targetPage) lbState.page = targetPage;
-            lbState.pageSize = parseInt(leaderboardPageSize.value, 10) || 15;
-
-            leaderboardStatus.textContent = 'Loading leaderboard...';
-            try {
-                var res = await fetch('/api/leaderboard?page=' + lbState.page + '&pageSize=' + lbState.pageSize);
-                if (!res.ok) throw new Error('Request failed with status ' + res.status);
-                var data = await res.json();
-
-                lbState.page = data.page;
-                lbState.totalPages = data.totalPages || 1;
-                lbState.totalCount = data.totalCount;
-                currentUsersData = data.items || [];
-
-                if (!currentUsersData.length) {
-                    leaderboardWrap.innerHTML = '<p class="empty-state">No users yet.</p>';
-                    leaderboardStatus.textContent = 'No users found.';
-                    leaderboardPagination.hidden = true;
-                    return;
-                }
-
-                var startRank = (lbState.page - 1) * lbState.pageSize;
-                var rows = currentUsersData.map(function (u, i) {
-                    var rank = startRank + i + 1;
-                    
-                    // 1. Live daily badges (Daily Warrior / Daily Commenter)
-                    var dailyHtml = (u.dailyBadges || []).map(function (b) {
-                        var cls = b.indexOf('Warrior') !== -1 ? 'badge-warrior' : 'badge-commenter';
-                        return '<span class="badge ' + cls + '">' + escapeHtml(b) + '</span>';
-                    }).join('');
-
-                    // 2. Highest permanent rank medal pill
-                    var permanentHtml = '';
-                    var nonDailyMedals = (u.medals || []).filter(function (m) { 
-                        return m.type !== 'Daily Warrior' && m.type !== 'Daily Commenter'; 
-                    });
-                    
-                    if (nonDailyMedals.length > 0) {
-                        var highest = nonDailyMedals[0];
-                        permanentHtml = '<span class="badge badge-permanent" onclick="openUserModal(' + u.id + ')" title="' + escapeHtml(highest.description) + '">' +
-                            getMedalIcon(highest.type) + ' ' + escapeHtml(highest.type) + 
-                            (nonDailyMedals.length > 1 ? ' (+' + (nonDailyMedals.length - 1) + ')' : '') +
-                            '</span>';
-                    }
-
-                    return '<tr' + (rank === 1 ? ' class="rank-1"' : '') + '>' +
-                        '<td>' + rank + '</td>' +
-                        '<td><a class="user-link" onclick="openUserModal(' + u.id + ')">' + escapeHtml(u.userName) + '</a>' + dailyHtml + permanentHtml + '</td>' +
-                        '<td class="' + pointsClass(u.points) + '">' + (u.points > 0 ? '+' : '') + u.points + '</td>' +
-                        '</tr>';
-                }).join('');
-
-                leaderboardWrap.innerHTML =
-                    '<table>' +
-                    '<caption class="visually-hidden">Users ranked by total points</caption>' +
-                    '<thead><tr><th scope="col">Rank</th><th scope="col">User</th><th scope="col">Points</th></tr></thead>' +
-                    '<tbody>' + rows + '</tbody>' +
-                    '</table>';
-
-                leaderboardStatus.textContent = 'Showing ' + currentUsersData.length + ' of ' + lbState.totalCount + ' total users.';
-                leaderboardPageInfo.textContent = 'Page ' + lbState.page + ' of ' + lbState.totalPages + ' (' + lbState.totalCount + ' users)';
-                leaderboardPrevBtn.disabled = lbState.page <= 1;
-                leaderboardNextBtn.disabled = lbState.page >= lbState.totalPages;
-                leaderboardPagination.hidden = lbState.totalPages <= 1;
-            } catch (e) {
-                leaderboardWrap.innerHTML = '';
-                leaderboardStatus.textContent = 'Could not load leaderboard: ' + e.message;
-                leaderboardPagination.hidden = true;
+        // Details Accordion Toggle
+        const btnToggle = document.getElementById('btnToggleDetails'), secDetails = document.getElementById('secDetails');
+        btnToggle.onclick = async () => {
+            const h = secDetails.hidden;
+            secDetails.hidden = !h;
+            document.getElementById('txtToggle').innerText = h ? 'Detayları gizle' : 'Detayları göster';
+            document.getElementById('arrToggle').innerText = h ? '▲' : '▼';
+            if(h){
+                if(!allTransactions.length) await fetchTx();
+                renderDetailTab();
             }
-        }
+        };
 
-        document.getElementById('refreshLeaderboardBtn').addEventListener('click', function () { loadLeaderboard(1); });
-        leaderboardPageSize.addEventListener('change', function () { loadLeaderboard(1); });
-        leaderboardPrevBtn.addEventListener('click', function () { if (lbState.page > 1) loadLeaderboard(lbState.page - 1); });
-        leaderboardNextBtn.addEventListener('click', function () { if (lbState.page < lbState.totalPages) loadLeaderboard(lbState.page + 1); });
-
-        // ---------- User Modal Handling ----------
-        window.openUserModal = function (userId) {
-            var user = currentUsersData.find(function (x) { return x.id === userId; });
-            if (!user) return;
-
-            document.getElementById('modalUserName').textContent = user.userName;
-            document.getElementById('modalUserPoints').textContent = user.points + ' Total Points';
-
-            var container = document.getElementById('modalMedalsList');
-            if (!user.medals || !user.medals.length) {
-                container.innerHTML = '<p class="empty-state">No permanent medals earned yet.</p>';
-            } else {
-                container.innerHTML = user.medals.map(function (m) {
-                    return '<div class="medal-item">' +
-                        '<div class="medal-icon">' + getMedalIcon(m.type) + '</div>' +
-                        '<div class="medal-details" style="flex:1;">' +
-                            '<strong>' + escapeHtml(m.type) + ' <span style="font-weight:normal; font-size:0.75rem; color:var(--muted); float:right;">' + m.date + '</span></strong>' +
-                            '<span>' + escapeHtml(m.description) + '</span>' +
-                        '</div>' +
-                    '</div>';
-                }).join('');
+        // Modal
+        window.openModal = function(id){
+            const u = users.find(x => x.id === id);
+            if(!u) return;
+            document.getElementById('mName').innerText = u.userName;
+            document.getElementById('mPts').innerText = `${u.points} Toplam Puan`;
+            const list = u.medals || [], daily = getDailyCounts(list);
+            const segs = [{t:'⚔️ Askeri Rütbeler',k:'mil'},{t:'🎓 Akademik Unvanlar',k:'acad'},{t:'🏆 İstikrar Rozetleri',k:'v'}];
+            let html = segs.map(s => {
+                let items = list.filter(m => R[s.k].includes(m.type));
+                return items.length ? `<div style="margin-bottom:12px"><span style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase">${s.t}</span>${items.map(m => `<div class="modal-item flex ac g8"><span>${getIcon(m.type)}</span><div><strong>${m.type}</strong><span style="display:block;font-size:.72rem;color:var(--muted)">${m.description||''}</span></div></div>`).join('')}</div>` : '';
+            }).join('');
+            if(Object.keys(daily).length){
+                html += `<div style="margin-bottom:12px"><span style="font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase">📜 Günlük Zaferler</span>${Object.entries(daily).map(([t, c]) => `<div class="modal-item flex ac g8"><span>${t.includes('Warrior')?I.w:I.c}</span><strong>${t} &times;${c}</strong></div>`).join('')}</div>`;
             }
-
+            document.getElementById('mContent').innerHTML = html || '<p style="color:var(--muted);text-align:center">Rozet bulunmuyor.</p>';
             document.getElementById('userModal').hidden = false;
         };
 
-        document.getElementById('closeModalBtn').addEventListener('click', function () {
-            document.getElementById('userModal').hidden = true;
-        });
+        window.closeModal = () => document.getElementById('userModal').hidden = true;
+        document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
 
-        document.getElementById('userModal').addEventListener('click', function (e) {
-            if (e.target === this) this.hidden = true;
-        });
+        // Refresh Button
+        document.getElementById('btnRefresh').onclick = async () => {
+            await fetchTx();
+            await loadLb();
+            if(!secDetails.hidden) renderDetailTab();
+        };
 
-        // ---------- Transactions Pagination ----------
-        var txState = { page: 1, pageSize: 25, totalPages: 1, totalCount: 0 };
-        var txWrap = document.getElementById('transactionsTableWrap');
-        var txStatus = document.getElementById('transactionsStatus');
-        var txUserFilter = document.getElementById('txUserFilter');
-        var txPagination = document.getElementById('txPagination');
-        var txPageInfo = document.getElementById('txPageInfo');
-        var txPrevBtn = document.getElementById('txPrevBtn');
-        var txNextBtn = document.getElementById('txNextBtn');
-        var txPageSize = document.getElementById('txPageSize');
-
-        async function loadUserFilterOptions() {
-            try {
-                var res = await fetch('/api/users');
-                if (!res.ok) return;
-                var users = await res.json();
-                users.forEach(function (u) {
-                    var opt = document.createElement('option');
-                    opt.value = u;
-                    opt.textContent = u;
-                    txUserFilter.appendChild(opt);
-                });
-            } catch (e) { }
-        }
-
-        async function loadTransactions(targetPage) {
-            if (targetPage) txState.page = targetPage;
-            txState.pageSize = parseInt(txPageSize.value, 10) || 25;
-
-            var user = txUserFilter.value;
-            var workItemId = document.getElementById('txWorkItemFilter').value;
-
-            var params = new URLSearchParams();
-            if (user) params.set('user', user);
-            if (workItemId) params.set('workItemId', workItemId);
-            params.set('page', txState.page);
-            params.set('pageSize', txState.pageSize);
-
-            txStatus.textContent = 'Loading transactions...';
-            try {
-                var res = await fetch('/api/transactions?' + params.toString());
-                if (!res.ok) throw new Error('Request failed with status ' + res.status);
-                var data = await res.json();
-
-                txState.page = data.page;
-                txState.totalPages = data.totalPages || 1;
-                txState.totalCount = data.totalCount;
-
-                var items = data.items || [];
-                if (!items.length) {
-                    txWrap.innerHTML = '<p class="empty-state">No transactions match these filters.</p>';
-                    txStatus.textContent = 'No transactions found.';
-                    txPagination.hidden = true;
-                    return;
-                }
-
-                var rows = items.map(function (t) {
-                    return '<tr>' +
-                        '<td><span style="white-space:nowrap">' + formatTimestamp(t.timestamp) + '</span></td>' +
-                        '<td>' + escapeHtml(t.userName) + '</td>' +
-                        '<td>' + escapeHtml(t.type) + '</td>' +
-                        '<td class="' + pointsClass(t.deltaPoints) + '">' + (t.deltaPoints > 0 ? '+' : '') + t.deltaPoints + '</td>' +
-                        '<td>' + (t.workItemId != null ? t.workItemId : '—') + '</td>' +
-                        '<td>' + escapeHtml(t.description) + '</td>' +
-                        '</tr>';
-                }).join('');
-
-                txWrap.innerHTML =
-                    '<div style="overflow-x:auto;">' +
-                    '<table>' +
-                    '<caption class="visually-hidden">Point transaction history</caption>' +
-                    '<thead><tr>' +
-                    '<th scope="col">Time</th><th scope="col">User</th><th scope="col">Type</th>' +
-                    '<th scope="col">Points</th><th scope="col">Task</th><th scope="col">Description</th>' +
-                    '</tr></thead>' +
-                    '<tbody>' + rows + '</tbody>' +
-                    '</table>' +
-                    '</div>';
-
-                txStatus.textContent = 'Showing ' + items.length + ' of ' + txState.totalCount + ' transactions.';
-                txPageInfo.textContent = 'Page ' + txState.page + ' of ' + txState.totalPages + ' (' + txState.totalCount + ' total)';
-                txPrevBtn.disabled = txState.page <= 1;
-                txNextBtn.disabled = txState.page >= txState.totalPages;
-                txPagination.hidden = txState.totalPages <= 1;
-            } catch (e) {
-                txWrap.innerHTML = '';
-                txStatus.textContent = 'Could not load transactions: ' + e.message;
-                txPagination.hidden = true;
-            }
-        }
-
-        document.getElementById('transactionFilterForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-            loadTransactions(1);
-        });
-        txPageSize.addEventListener('change', function () { loadTransactions(1); });
-        txPrevBtn.addEventListener('click', function () { if (txState.page > 1) loadTransactions(txState.page - 1); });
-        txNextBtn.addEventListener('click', function () { if (txState.page < txState.totalPages) loadTransactions(txState.page + 1); });
-
-        // ---------- Comment tester ----------
-        var testerForm = document.getElementById('testerForm');
-        var evaluateBtn = document.getElementById('evaluateBtn');
-        var resultBox = document.getElementById('resultBox');
-        var jsonResult = document.getElementById('jsonResult');
-
-        testerForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-            evaluateBtn.disabled = true;
-            evaluateBtn.textContent = 'Evaluating...';
-
-            var payload = {
-                title: document.getElementById('title').value,
-                comment: document.getElementById('comment').value
-            };
-
-            try {
-                var res = await fetch('/api/test-score', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                var data = await res.json();
-
-                var passed = data.score >= 50;
-                resultBox.hidden = false;
-                resultBox.className = 'result-box ' + (passed ? 'pass' : 'fail');
-                resultBox.innerHTML = (passed ? '✅ Pass' : '❌ Fail') + ' &mdash; Score: ' + data.score + ' / 100';
-
-                jsonResult.hidden = false;
-                jsonResult.textContent = JSON.stringify(data, null, 2);
-            } catch (err) {
-                resultBox.hidden = false;
-                resultBox.className = 'result-box fail';
-                resultBox.textContent = 'Evaluation failed: ' + err.message;
-                jsonResult.hidden = true;
-            } finally {
-                evaluateBtn.disabled = false;
-                evaluateBtn.textContent = 'Evaluate Comment';
-            }
-        });
-
-        // ---------- Scoring rule toggles ----------
-        var toggleMap = [
-            { id: 'toggle-comments', key: 'commentsEnabled', label: 'Comment points' },
-            { id: 'toggle-completed-work', key: 'completedWorkEnabled', label: 'Completed work points' },
-            { id: 'toggle-remaining-work', key: 'remainingWorkEnabled', label: 'Remaining work points' },
-            { id: 'toggle-state-changed', key: 'stateChangedEnabled', label: 'Closing points' },
-            { id: 'toggle-iteration-changed', key: 'iterationChangedEnabled', label: 'Iteration change adjustment' }
-        ];
-        var settingsStatus = document.getElementById('settingsStatus');
-
-        async function loadSettings() {
-            settingsStatus.textContent = 'Loading scoring rules...';
-            toggleMap.forEach(function (m) { document.getElementById(m.id).disabled = true; });
-            try {
-                var res = await fetch('/api/settings');
-                if (!res.ok) throw new Error('Request failed with status ' + res.status);
-                var data = await res.json();
-                toggleMap.forEach(function (m) {
-                    var el = document.getElementById(m.id);
-                    el.checked = !!data[m.key];
-                    el.setAttribute('aria-checked', el.checked ? 'true' : 'false');
-                    el.disabled = false;
-                });
-                settingsStatus.textContent = 'Scoring rules loaded.';
-            } catch (e) {
-                settingsStatus.textContent = 'Could not load scoring rules: ' + e.message;
-                toggleMap.forEach(function (m) { document.getElementById(m.id).disabled = false; });
-            }
-        }
-
-        async function saveSettings(changedLabel) {
-            var payload = {};
-            toggleMap.forEach(function (m) {
-                payload[m.key] = document.getElementById(m.id).checked;
-            });
-
-            settingsStatus.textContent = 'Saving...';
-            try {
-                var res = await fetch('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (!res.ok) throw new Error('Request failed with status ' + res.status);
-                settingsStatus.textContent = changedLabel + ' ' + (payload[toggleMap.find(function (m) { return m.label === changedLabel; }).key] ? 'enabled.' : 'disabled.');
-            } catch (e) {
-                settingsStatus.textContent = 'Could not save scoring rules: ' + e.message;
-            }
-        }
-
-        toggleMap.forEach(function (m) {
-            var el = document.getElementById(m.id);
-            el.addEventListener('change', function () {
-                el.setAttribute('aria-checked', el.checked ? 'true' : 'false');
-                saveSettings(m.label);
-            });
-        });
-
-        // ---------- Init ----------
-        loadLeaderboard(1);
-        loadUserFilterOptions();
-        loadTransactions(1);
-        loadSettings();
+        // Initial Load
+        fetchTx().then(loadLb);
     })();
     </script>
 </body>

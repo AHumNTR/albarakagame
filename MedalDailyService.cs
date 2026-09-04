@@ -29,8 +29,8 @@ public class DailyMedalAwardBackgroundService : BackgroundService
 
     private static readonly FrozenDictionary<int, string> ConsistencyMilestones = new Dictionary<int, string>
     {
-        [5] = "v3",
-        [15] = "v6",
+        [1] = "v3",
+        [2] = "v6",
         [45] = "v8",
         [90] = "v10",
         [150] = "v12"

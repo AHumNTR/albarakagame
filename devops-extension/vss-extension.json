@@ -1,0 +1,51 @@
+{
+  "manifestVersion": 1,
+  "id": "team-points-gamification",
+  "version": "1.0.4",
+  "name": "Team Points Dashboard",
+  "description": "Gamified team leaderboard, scoring, and medals dashboard.",
+  "publisher": "KeremKupeli",
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "icons": {
+    "default": "static/icon.png"
+  },
+  "scopes": [
+    "vso.work"
+  ],
+  "categories": [
+    "Azure Boards"
+  ],
+"files": [
+  {
+    "path": "dashboard.html",
+    "addressable": true
+  },
+  {
+    "path": "lib",
+    "addressable": true
+  },
+  {
+    "path": "static",
+    "addressable": true
+  }
+],
+  "contributions": [
+    {
+      "id": "team-points-hub",
+      "type": "ms.vss-web.hub",
+      "targets": [
+        "ms.vss-work-web.work-hub-group"
+      ],
+      "properties": {
+        "name": "Points Dashboard",
+        "uri": "dashboard.html",
+        "icon": "asset://static/icon.png",
+        "supportsMobile": false
+      }
+    }
+  ]
+}
