@@ -75,11 +75,18 @@
 				</div>
 			</div>
 
+			<!-- Top 3 List -->
 			<div class="leader-list" id="topRankersList"></div>
-			<div class="divider-dots">&bull;&bull;&bull;</div>
-			<div class="leader-list" id="myRankRowContainer"></div>
 
-			<div style="margin-top:4px;">
+			<!-- Middle section (visible only when you are NOT in top 3 and NOT in bottom 3) -->
+			<div id="middleRankSection" style="display:none;">
+				<div class="divider-dots">&bull;&bull;&bull;</div>
+				<div class="leader-list" id="myRankRowContainer"></div>
+				<div class="divider-dots">&bull;&bull;&bull;</div>
+			</div>
+
+			<!-- Bottom 3 List -->
+			<div id="bottomRankersSection" style="margin-top:4px;">
 				<div style="font-size:0.75rem; color:var(--muted); margin-bottom:6px;">Son Sıralar</div>
 				<div class="leader-list" id="bottomRankersList"></div>
 			</div>

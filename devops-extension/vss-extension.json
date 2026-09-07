@@ -1,8 +1,9 @@
 {
   "manifestVersion": 1,
   "id": "team-points-gamification",
-  "version": "1.0.15",
+  "version": "1.0.19",
   "name": "Team Points Dashboard",
+	"baseUri": "https://test2.humn.tr",
   "description": "Gamified team leaderboard, scoring, and medals dashboard.",
   "publisher": "KeremKupeli",
   "targets": [
@@ -19,6 +20,7 @@
   "categories": [
     "Azure Boards"
   ],
+
 "files": [
   {
     "path": "dashboard.html",

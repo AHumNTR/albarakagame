@@ -4,6 +4,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using System.Net.Http.Headers;
+using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -34,6 +35,7 @@ builder.Services.AddCors(options =>
 			.AllowAnyMethod();
 	});
 });
+
 builder.Services.AddHostedService<IterationSyncBackgroundService>();
 builder.Services.AddHostedService<DailyMedalAwardBackgroundService>();
 builder.Services.AddSingleton(sp =>
@@ -54,6 +56,11 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseCors("DevOpsCors");
+app.UseStaticFiles(new StaticFileOptions
+{
+	FileProvider = new PhysicalFileProvider("/home/humn/albarakagame/devops-extension"),
+	RequestPath = ""
+});
 app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =>
 {
     var items = new List<TestCaseItem>();
@@ -129,6 +136,7 @@ app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
             DeltaPoints = 0,
             WorkItemId = workItemId,
             Description = "Iteration changed to current iteration not changing anything",
+            IterationPath=iterationPath,
             Timestamp = DateTime.UtcNow
         };
 
@@ -170,6 +178,7 @@ app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
                 Type = "Completed Work Updated",
                 DeltaPoints = 0,
                 WorkItemId = workItemId,
+                IterationPath=iterationPath,
                 Timestamp = DateTime.UtcNow
             };
 
@@ -217,6 +226,8 @@ app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
                 Type = "Remaining Work Updated",
                 DeltaPoints = 0,
                 WorkItemId = workItemId,
+
+                IterationPath=iterationPath,
                 Timestamp = DateTime.UtcNow
             };
 
@@ -257,6 +268,8 @@ app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
                 DeltaPoints = 0,
                 WorkItemId = workItemId,
                 Description = "State changed to something other than done not granting any points",
+
+                IterationPath=iterationPath,
                 Timestamp = DateTime.UtcNow
             };
 
@@ -302,7 +315,9 @@ app.MapPost("/commentadded", async (JsonNode payload, AppDbContext db, ZeroShotC
     int? workItemId = payload?["resource"]?["id"]?.GetValue<int>();
     string? message = payload?["resource"]?["fields"]?["System.History"]?.ToString();
     string? title = payload?["resource"]?["fields"]?["System.Title"]?.ToString();
+    var iterationPath = payload?["resource"]?["fields"]?["System.IterationPath"]?.ToString();
     string cleanText = WebUtility.HtmlDecode(
+
     Regex.Replace(message ?? string.Empty, "<.*?>", " ")
     );
 
@@ -319,6 +334,7 @@ app.MapPost("/commentadded", async (JsonNode payload, AppDbContext db, ZeroShotC
         DeltaPoints = 0,//shouldnt cause a issue in seperating them since they cant call at the same time
         WorkItemId = workItemId,
         Description = $"",
+        IterationPath=iterationPath,
         Timestamp = DateTime.UtcNow
     };
 
@@ -382,6 +398,7 @@ app.MapGet("/api/leaderboard", async (
 	HttpContext httpContext,
 	AppDbContext db,
 	IHttpClientFactory httpClientFactory,
+	string scope = "all",
 	int page = 1,
 	int pageSize = 15) =>
 {
@@ -390,6 +407,45 @@ app.MapGet("/api/leaderboard", async (
 	var todayUtc = DateTime.UtcNow.Date;
 
 	var caller = await GetCallerIdentityAsync(httpContext, httpClientFactory);
+
+	// Determine transaction date boundary
+	DateTime? filterStartDate = scope switch
+	{
+		"today" => todayUtc,
+		"7days" => DateTime.UtcNow.AddDays(-7),
+		"sprint" => DateTime.UtcNow.AddDays(-14),
+		_ => null
+	};
+
+	Dictionary<int, int> scopedScores = new();
+	if (filterStartDate.HasValue)
+	{
+		scopedScores = await db.Transactions
+			.AsNoTracking()
+			.Where(t => t.Timestamp >= filterStartDate.Value)
+			.GroupBy(t => t.UserId)
+			.Select(g => new { UserId = g.Key, Points = g.Sum(x => x.DeltaPoints) })
+			.ToDictionaryAsync(x => x.UserId, x => x.Points);
+	}
+
+	var allUsers = await db.Users.AsNoTracking().ToListAsync();
+
+	// Order by scoped points if filtered, otherwise by total points
+	var rankedList = allUsers
+		.Select(u => new
+		{
+			u.Id,
+			u.UserName,
+			Points = filterStartDate.HasValue ? scopedScores.GetValueOrDefault(u.Id, 0) : u.Points
+		})
+		.OrderByDescending(u => u.Points)
+		.ThenBy(u => u.UserName)
+		.ToList();
+
+	var totalCount = rankedList.Count;
+	var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+	var pageUsers = rankedList.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+	var userIds = pageUsers.Select(u => u.Id).ToList();
 
 	var todayTransactions = await db.Transactions
 		.AsNoTracking()
@@ -414,18 +470,6 @@ app.MapGet("/api/leaderboard", async (
 		.Select(x => (int?)x.UserId)
 		.FirstOrDefault();
 
-	var query = db.Users.OrderByDescending(u => u.Points).ThenBy(u => u.UserName);
-	var totalCount = await query.CountAsync();
-	var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
-
-	var users = await query
-		.Skip((page - 1) * pageSize)
-		.Take(pageSize)
-		.Select(u => new { u.Id, u.UserName, u.Points })
-		.ToListAsync();
-
-	var userIds = users.Select(u => u.Id).ToList();
-
 	var userMedals = await db.Medals
 		.AsNoTracking()
 		.Where(m => userIds.Contains(m.UserId))
@@ -435,7 +479,7 @@ app.MapGet("/api/leaderboard", async (
 
 	var medalGroup = userMedals.GroupBy(m => m.UserId).ToDictionary(g => g.Key, g => g.ToList());
 
-	var items = users.Select(u =>
+	var items = pageUsers.Select(u =>
 	{
 		bool isCaller = !string.IsNullOrEmpty(caller) && u.UserName.Contains(caller, StringComparison.OrdinalIgnoreCase);
 
@@ -505,6 +549,7 @@ app.MapGet("/api/transactions", async (
 			t.DeltaPoints,
 			t.WorkItemId,
 			t.Description,
+            t.IterationPath,
 			t.Timestamp
 		})
 		.ToListAsync();
@@ -512,6 +557,14 @@ app.MapGet("/api/transactions", async (
 	return Results.Ok(new { items = results, totalCount, page, pageSize, totalPages });
 });
 
+app.MapGet("/api/currentiteration", async (
+	) =>
+        {
+        return Results.Ok(new
+    {
+        iterationPath = IterationSyncBackgroundService.CurrentIterationPath
+    });
+});
 app.MapGet("/api/users", async (AppDbContext db) =>
 {
     var users = await db.Users
@@ -568,7 +621,7 @@ app.MapPost("/api/settings", async (ScoringSettingsRequest req, AppDbContext db)
     });
 });
 
-app.MapGet("/dashboard", () => {return Results.File(Path.Combine(AppContext.BaseDirectory, "dashboard.html"), "text/html");});
+app.MapGet("/dashboard", () => {return Results.File("/home/humn/albarakagame/devops-extension/dashboard.html", "text/html");});
 app.MapPost("/api/admin/run-eod", async (AppDbContext db, string? date) =>
 {
     // Defaults to yesterday UTC if no date is provided
@@ -675,6 +728,7 @@ public class PointTransaction
     public int DeltaPoints { get; set; }
     public int? WorkItemId { get; set; }
     public string? Description { get; set; }//maybe should add iteration?
+    public string? IterationPath{get;set;}
     public DateTime Timestamp { get; set; }
 }
 

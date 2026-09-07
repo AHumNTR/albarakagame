@@ -1,5 +1,9 @@
+const DEV_TOKEN = "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
 const API_BASE = "https://test.humn.tr";
-
+const DEV_USER = {
+	displayName: "kerem kupeli",
+	email: "kupeli24@itu.edu.tr"
+};
 const RANKS = {
 	mil: ['Albay', 'Tuğgeneral', 'Tümgeneral', 'Orgeneral', 'Genel Kurmay Başkanı'],
 	acad: ['Öğretim Görevlisi', 'Doktor', 'Doçent Doktor', 'Profesör Doktor', 'Ordinaryüs Profesör'],
@@ -12,8 +16,9 @@ let myUserTransactions = [];
 let currentUser = null;
 let currentTimeFilter = 'all';
 let devopsUser = null;
+let currentIteration=null
 
-const escapeHtml = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const escapeHtml = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function extractEmail(str) {
 	if (!str) return '';
@@ -58,7 +63,7 @@ function setSubTab(idx, btn) {
 }
 
 // Time Filtering Logic
-function applyTimeScope(scope, btn) {
+async function applyTimeScope(scope, btn) {
 	currentTimeFilter = scope;
 	btn.parentElement.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
 	btn.classList.add('active');
@@ -66,10 +71,28 @@ function applyTimeScope(scope, btn) {
 	document.getElementById('myScoreSubLabel').innerText = `TÜM ŞİRKET \u2022 ${btn.innerText.toUpperCase()}`;
 	document.getElementById('leaderFilterTag').innerText = btn.innerText;
 
+	let token = '';
+	if (window.SDK && typeof SDK.getAccessToken === 'function') {
+		try {
+			token = await Promise.race([
+				SDK.getAccessToken(),
+				new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+			]);
+		} catch (e) {
+			token = DEV_TOKEN;
+		}
+	}
+	token = token || DEV_TOKEN;
+	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+	const lbRes = await fetch(`${API_BASE}/api/leaderboard?scope=${scope}&page=1&pageSize=100`, { headers });
+	const lbData = await lbRes.json();
+	cachedUsers = lbData.items || [];
+
 	renderDynamicViews();
 }
 
-function isTransactionInScope(txDate, scope) {
+function isTransactionInScope(txDate, scope,iteration) {
 	if (scope === 'all') return true;
 	const now = new Date();
 	const t = new Date(txDate);
@@ -82,8 +105,7 @@ function isTransactionInScope(txDate, scope) {
 		return diffDays >= 0 && diffDays <= 7;
 	}
 	if (scope === 'sprint') {
-		const diffDays = (now - t) / (1000 * 60 * 60 * 24);
-		return diffDays >= 0 && diffDays <= 14;
+		return iteration===currentIteration;
 	}
 	return true;
 }
@@ -96,116 +118,104 @@ async function refreshAll() {
 		console.error("Yükleme hatası:", e);
 	}
 }
+
 function resolveCurrentUser(users) {
-	const caller = users.find(u => Array.isArray(u.medals));
-	if (caller) return caller;
+	if (!users || !users.length) return null;
 
-	if (devopsUser) {
-		const devopsEmail = extractEmail(devopsUser.name || devopsUser.email || devopsUser.uniqueName || '');
-		const devopsDisplayName = cleanDisplayName(devopsUser.displayName || devopsUser.name || '').toLowerCase();
+	// 1. In Program.cs, only the calling user has their unmasked name (everyone else has '***')
+	const unmasked = users.find(u => u.userName && !u.userName.includes('***'));
+	if (unmasked) return unmasked;
 
-		if (devopsEmail) {
-			const matchedByEmail = users.find(u => extractEmail(u.userName) === devopsEmail);
-			if (matchedByEmail) return matchedByEmail;
+	// 2. Fall back to DevOps SDK context or DEV_USER
+	const target = devopsUser || DEV_USER;
+	if (target) {
+		const targetEmail = extractEmail(target.email || target.name || target.uniqueName || '');
+		const targetDisplayName = cleanDisplayName(target.displayName || target.name || '').toLowerCase();
+
+		if (targetEmail) {
+			const byEmail = users.find(u => extractEmail(u.userName) === targetEmail);
+			if (byEmail) return byEmail;
 		}
 
-		if (devopsDisplayName) {
-			const matchedByName = users.find(u => cleanDisplayName(u.userName).toLowerCase() === devopsDisplayName);
-			if (matchedByName) return matchedByName;
+		if (targetDisplayName) {
+			const byName = users.find(u => cleanDisplayName(u.userName).toLowerCase() === targetDisplayName);
+			if (byName) return byName;
+
+			// Handle masked matching by initials (e.g. "kerem kupeli" matching "k*** k***")
+			const targetParts = targetDisplayName.split(' ').filter(Boolean);
+			const byInitials = users.find(u => {
+				const parts = cleanDisplayName(u.userName).toLowerCase().split(' ').filter(Boolean);
+				if (parts.length !== targetParts.length) return false;
+				return parts.every((p, idx) => p[0] === targetParts[idx][0]);
+			});
+			if (byInitials) return byInitials;
 		}
 	}
-	return users[0];
+
+	return users[0] || null;
 }
+
 async function loadAllData() {
 	let token = '';
 	if (window.SDK && typeof SDK.getAccessToken === 'function') {
 		try {
-			token = await SDK.getAccessToken();
+			token = await Promise.race([
+				SDK.getAccessToken(),
+				new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+			]);
 		} catch (e) {
-			console.warn("Token alınamadı:", e);
+			token = DEV_TOKEN;
 		}
 	}
-
+	token = token || DEV_TOKEN;
 	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-	const [lbRes, txRes] = await Promise.all([
+	const [lbRes, txRes,itRes] = await Promise.all([
 		fetch(`${API_BASE}/api/leaderboard?page=1&pageSize=100`, { headers }),
-		fetch(`${API_BASE}/api/transactions?page=1&pageSize=500`, { headers })
+		fetch(`${API_BASE}/api/transactions?page=1&pageSize=500`, { headers }),
+		fetch(`${API_BASE}/api/currentiteration`, { headers })
 	]);
 
 	const lbData = await lbRes.json();
+
+	const itData= await itRes.json();
 	const txData = await txRes.json();
 
 	cachedUsers = lbData.items || [];
 	allRawTransactions = txData.items || [];
+	currentIteration= itData.iterationPath|| null;
 
 	document.getElementById('leaderTotalUsers').innerText = `${lbData.totalCount || cachedUsers.length} kişi`;
 
 	if (!cachedUsers.length) return;
 
 	currentUser = resolveCurrentUser(cachedUsers);
-	const currentEmail = extractEmail(currentUser.userName);
+	const currentEmail = currentUser ? extractEmail(currentUser.userName) : '';
 
 	myUserTransactions = allRawTransactions.filter(t => {
+		if (!currentUser) return false;
 		if (t.userName === currentUser.userName) return true;
 		const txEmail = extractEmail(t.userName);
 		return currentEmail && txEmail && txEmail === currentEmail;
 	});
 
 	renderDynamicViews();
-	renderRozetlerGrid(currentUser);
-}
-
-function resolveCurrentUser(users) {
-	if (devopsUser) {
-		// Extract email from SDK context (e.g. devopsUser.name = "John Doe <john@doe.com>")
-		const devopsEmail = extractEmail(devopsUser.name || devopsUser.email || devopsUser.uniqueName || '');
-		const devopsDisplayName = cleanDisplayName(devopsUser.displayName || devopsUser.name || '').toLowerCase();
-
-		if (devopsEmail) {
-			const matchedByEmail = users.find(u => extractEmail(u.userName) === devopsEmail);
-			if (matchedByEmail) return matchedByEmail;
-		}
-
-		if (devopsDisplayName) {
-			const matchedByName = users.find(u => cleanDisplayName(u.userName).toLowerCase() === devopsDisplayName);
-			if (matchedByName) return matchedByName;
-		}
-	}
-	return users[0];
+	if (currentUser) renderRozetlerGrid(currentUser);
 }
 
 function renderDynamicViews() {
 	if (!currentUser) return;
 
-	const userScoreMap = {};
-	cachedUsers.forEach(u => {
-		userScoreMap[u.userName] = (currentTimeFilter === 'all') ? u.points : 0;
-	});
-
-	if (currentTimeFilter !== 'all') {
-		allRawTransactions.forEach(t => {
-			if (isTransactionInScope(t.timestamp, currentTimeFilter)) {
-				const matchedUser = cachedUsers.find(u => {
-					if (u.userName === t.userName) return true;
-					const uEmail = extractEmail(u.userName);
-					const tEmail = extractEmail(t.userName);
-					return uEmail && tEmail && uEmail === tEmail;
-				});
-				const key = matchedUser ? matchedUser.userName : t.userName;
-				userScoreMap[key] = (userScoreMap[key] || 0) + (t.deltaPoints || 0);
-			}
-		});
-	}
-
+	// In scope-based server responses, cachedUsers already contains the filtered points
 	const dynamicRankedUsers = cachedUsers.map(u => ({
 		...u,
-		filteredPoints: userScoreMap[u.userName] || 0
+		filteredPoints: u.points
 	})).sort((a, b) => b.filteredPoints - a.filteredPoints || a.userName.localeCompare(b.userName));
 
 	const myRankIndex = dynamicRankedUsers.findIndex(u => u.id === currentUser.id);
 	const myRank = myRankIndex !== -1 ? myRankIndex + 1 : 1;
-	const myCurrentScore = userScoreMap[currentUser.userName] || 0;
+	const myUserObj = dynamicRankedUsers.find(u => u.id === currentUser.id);
+	const myCurrentScore = myUserObj ? myUserObj.filteredPoints : 0;
 
 	document.getElementById('myRankBadge').innerText = `#${myRank}`;
 	document.getElementById('myUserName').innerText = cleanDisplayName(currentUser.userName);
@@ -217,7 +227,6 @@ function renderDynamicViews() {
 		.filter(t => new Date(t.timestamp).toDateString() === todayStr)
 		.reduce((acc, t) => acc + (t.deltaPoints || 0), 0);
 	document.getElementById('myDailySummary').innerText = `Bugün ${todayPoints}p \u2022`;
-	
 
 	renderLeaderboardColumn(dynamicRankedUsers, currentUser.id);
 	renderGecmisTab();
@@ -226,14 +235,22 @@ function renderDynamicViews() {
 }
 
 function renderLeaderboardColumn(users, myId) {
-	const top5 = users.slice(0, 5);
-	const bottom5 = users.length > 5 ? users.slice(-5) : [];
+	const top3 = users.slice(0, 3);
+	const bottomStartIndex = Math.max(3, users.length - 3);
+	const bottom3 = users.length > 3 ? users.slice(bottomStartIndex) : [];
+
+	const isUserMe = u => Boolean((myId != null && u.id === myId) || (currentUser && u.userName === currentUser.userName));
+	const myIndex = users.findIndex(isUserMe);
+
+	const isInTop3 = myIndex !== -1 && myIndex < 3;
+	const isInBottom3 = myIndex !== -1 && myIndex >= bottomStartIndex;
+	const isInMiddle = myIndex !== -1 && !isInTop3 && !isInBottom3;
 
 	const renderRow = (u, rank, isMe) => {
 		const medalIcon = rank === 1 ? '&#129351;' : rank === 2 ? '&#129352;' : rank === 3 ? '&#129353;' : rank;
 		const cleanName = cleanDisplayName(u.userName);
-		const displayName = isMe 
-			? `${escapeHtml(cleanName)} <span class="tag-me">SEN</span>` 
+		const displayName = isMe
+			? `${escapeHtml(cleanName)} <span class="tag-me">SEN</span>`
 			: (u.userName ? maskName(u.userName) : `Kullanıcı #${rank}`);
 		const sub = isMe ? `<span style="font-size:0.72rem; color:var(--muted); display:block; margin-top:2px;">Yazılım Geliştirme &bull; AlbarakaTech</span>` : '';
 
@@ -251,22 +268,41 @@ function renderLeaderboardColumn(users, myId) {
 		`;
 	};
 
-	document.getElementById('topRankersList').innerHTML = top5.map((u, i) => renderRow(u, i + 1, u.id === myId)).join('');
+	// 1. Render Top 3 (if you are in top 3, you get highlighted with the SEN tag here)
+	document.getElementById('topRankersList').innerHTML = top3.map((u, i) => renderRow(u, i + 1, isUserMe(u))).join('');
 
-	const myIndex = users.findIndex(u => u.id === myId);
-	if (myIndex !== -1) {
-		document.getElementById('myRankRowContainer').innerHTML = renderRow(users[myIndex], myIndex + 1, true);
+	// 2. Middle Section: strictly visible only when isInMiddle is true
+	const middleSection = document.getElementById('middleRankSection');
+	const middleEl = document.getElementById('myRankRowContainer');
+	const allDots = document.querySelectorAll('.divider-dots');
+
+	if (isInMiddle) {
+		if (middleSection) middleSection.style.display = 'block';
+		if (middleEl) middleEl.innerHTML = renderRow(users[myIndex], myIndex + 1, true);
+		allDots.forEach(d => { d.style.display = 'block'; });
+	} else {
+		if (middleSection) middleSection.style.display = 'none';
+		if (middleEl) middleEl.innerHTML = '';
+		allDots.forEach(d => { d.style.display = 'none'; });
 	}
 
-	document.getElementById('bottomRankersList').innerHTML = bottom5.map((u, i) => {
-		const rank = users.length - bottom5.length + i + 1;
-		return renderRow(u, rank, u.id === myId);
-	}).join('');
+	// 3. Render Bottom 3 (if you are in bottom 3, you get highlighted with the SEN tag here)
+	const bottomSection = document.getElementById('bottomRankersSection');
+	if (bottom3.length > 0) {
+		if (bottomSection) bottomSection.style.display = 'block';
+		document.getElementById('bottomRankersList').innerHTML = bottom3.map((u, i) => {
+			const rank = bottomStartIndex + i + 1;
+			return renderRow(u, rank, isUserMe(u));
+		}).join('');
+	} else {
+		if (bottomSection) bottomSection.style.display = 'none';
+		document.getElementById('bottomRankersList').innerHTML = '';
+	}
 }
 
 function renderGecmisTab() {
 	const container = document.getElementById('subtab-gecmis');
-	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter));
+	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter,t.iterationPath));
 
 	if (!filtered.length) {
 		container.innerHTML = '<p style="color:var(--muted); font-size:0.85rem; padding:10px;">Bu zaman aralığında işlem bulunmuyor.</p>';
@@ -284,14 +320,14 @@ function renderGecmisTab() {
 					<span>${escapeHtml(t.type || 'Puan Hareketi')}</span>
 				</div>
 				<div class="act-body">${escapeHtml(t.description || '')}</div>
-				<div class="act-meta">#${t.workItemId || '---'} &bull; ${new Date(t.timestamp).toLocaleDateString('tr-TR')} ${new Date(t.timestamp).toLocaleTimeString('tr-TR', {hour:'2-digit', minute:'2-digit'})}</div>
+				<div class="act-meta">#${t.workItemId || '---'} &bull; ${new Date(t.timestamp).toLocaleDateString('tr-TR')} ${new Date(t.timestamp).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}</div>
 			</div>
 		`;
 	}).join('');
 }
 
 function renderIstatistikTab() {
-	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter));
+	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter,t.iterationPath));
 	const totalPts = filtered.reduce((acc, t) => acc + (t.deltaPoints || 0), 0);
 	const commentCount = filtered.filter(t => t.type === 'Comment Added' && t.deltaPoints > 0).length;
 	const completedWorkPoints = filtered.filter(t => t.type === 'Completed Work Updated').reduce((acc, t) => acc + (t.deltaPoints || 0), 0);
@@ -422,17 +458,25 @@ function closeModal() { document.getElementById('userModal').setAttribute('hidde
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
 // SDK Init: Read host identity
-if (window.SDK) {
+if (window.SDK && typeof SDK.init === 'function') {
 	SDK.init({ applyTheme: true });
-	SDK.ready().then(() => {
-		try {
-			devopsUser = SDK.getUser();
-		} catch (e) {
-			console.warn("Could not retrieve Azure DevOps user context:", e);
-		}
-		SDK.notifyLoadSucceeded();
-		refreshAll();
-	});
+	const readyTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000));
+
+	Promise.race([SDK.ready(), readyTimeout])
+		.then(() => {
+			try {
+				devopsUser = SDK.getUser();
+			} catch (e) {
+				devopsUser = DEV_USER;
+			}
+			SDK.notifyLoadSucceeded();
+			refreshAll();
+		})
+		.catch(() => {
+			devopsUser = DEV_USER;
+			refreshAll();
+		});
 } else {
+	devopsUser = DEV_USER;
 	refreshAll();
 }
