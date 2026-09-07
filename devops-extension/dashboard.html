@@ -1,338 +1,146 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="tr">
 <head>
-    <script>
-        window.define = function(deps, factory) {
-            const fn = typeof deps === 'function' ? deps : factory;
-            const exp = {};
-            // Pass exp as both the 1st and 2nd argument so whether it expects (exports) or (require, exports), it never gets null
-            const res = fn ? fn(exp, exp) : null;
-            window.SDK = (res && Object.keys(res).length > 0) ? res : exp;
-        };
-        window.define.amd = true;
-    </script>
-    <script src="lib/SDK.min.js"></script>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Team Points Dashboard</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        :root { --bg: #0f172a; --card: #1e293b; --text: #f8fafc; --muted: #94a3b8; --border: #334155; --accent: #6366f1; --accent-h: #818cf8; }
-        * { box-sizing: border-box; }
-        body { font-family: 'Inter', system-ui, sans-serif; max-width: 1100px; margin: 0 auto; padding: 30px 16px; background: var(--bg); color: var(--text); line-height: 1.5; }
-        .card { background: var(--card); padding: 24px; border-radius: 14px; border: 1px solid var(--border); }
-        [role="tablist"] { display: flex; gap: 8px; border-bottom: 2px solid var(--border); padding-bottom: 6px; margin-bottom: 20px; }
-        [role="tab"] { background: none; border: none; padding: 8px 16px; font-weight: 600; color: var(--muted); cursor: pointer; border-radius: 6px; }
-        [role="tab"][aria-selected="true"] { background: rgba(99,102,241,.15); color: var(--accent-h); }
-        [role="tabpanel"][hidden] { display: none; }
-        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 16px; }
-        th, td { padding: 12px; border-bottom: 1px solid var(--border); text-align: left; }
-        th { background: #0f172a; color: var(--muted); text-transform: uppercase; font-size: .75rem; letter-spacing: .05em; }
-        .user-cell { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-        .badge-col { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-        .badge-row { display: flex; flex-wrap: wrap; gap: 4px; }
-        .badge { display: inline-flex; align-items: center; gap: 4px; font-size: .7rem; font-weight: 600; padding: 2px 7px; border-radius: 6px; line-height: 1.2; }
-        .b-warrior { background: rgba(239,68,68,.15); color: #f87171; border: 1px solid rgba(239,68,68,.3); }
-        .b-commenter { background: rgba(99,102,241,.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,.3); }
-        .b-military { background: rgba(239,68,68,.12); color: #fca5a5; border: 1px solid rgba(239,68,68,.3); cursor: pointer; }
-        .b-academic { background: rgba(147,51,234,.15); color: #d8b4fe; border: 1px solid rgba(147,51,234,.3); cursor: pointer; }
-        .b-consistency { background: rgba(234,179,8,.15); color: #fde047; border: 1px solid rgba(234,179,8,.3); cursor: pointer; }
-        .b-stacked { background: rgba(51,65,85,.6); color: #cbd5e1; border: 1px solid var(--border); }
-        .btn { background: var(--accent); color: #fff; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-        .btn-sec { background: #334155; }
-        .btn:hover { background: var(--accent-h); }
-        .btn-sec:hover { background: #475569; }
-        .btn:disabled { opacity: .5; cursor: not-allowed; }
-        input, select, textarea { background: #0f172a; border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; width: 100%; }
-        .flex-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-        .flex-row > div { flex: 1; min-width: 160px; }
-        .p-pos { color: #34d399; font-weight: 600; } .p-neg { color: #f87171; font-weight: 600; } .p-zero { color: var(--muted); }
-        .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; font-size: .85rem; color: var(--muted); }
-        .modal { position: fixed; inset: 0; background: rgba(15,23,42,.8); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 99; padding: 16px; }
-        .modal[hidden] { display: none !important; }
-        .modal-box { background: var(--card); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 500px; max-height: 80vh; overflow-y: auto; padding: 20px; }
-        .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-        .m-close { background: none; border: none; color: var(--muted); font-size: 1.5rem; cursor: pointer; }
-        .seg { margin-bottom: 16px; }
-        .seg-title { font-size: .75rem; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 6px; }
-        .medal-item { display: flex; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: rgba(15,23,42,.4); margin-bottom: 4px; font-size: .85rem; }
-        .toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
-        .switch { position: relative; width: 42px; height: 22px; }
-        .switch input { position: absolute; inset: 0; appearance: none; background: var(--border); border-radius: 99px; cursor: pointer; }
-        .switch input:checked { background: var(--accent); }
-        .switch input::before { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: .15s; }
-        .switch input:checked::before { transform: translateX(20px); }
-    </style>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Puanlar & Liderlik</title>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="dashboard.css">
+	<script>
+		window.define = function(deps, factory) {
+			const fn = typeof deps === 'function' ? deps : factory;
+			const exp = {};
+			const res = fn ? fn(exp, exp) : null;
+			window.SDK = (res && Object.keys(res).length > 0) ? res : exp;
+		};
+		window.define.amd = true;
+	</script>
+	<script src="lib/SDK.min.js"></script>
+	<script src="dashboard.js" defer></script>
 </head>
 <body>
-    <header style="margin-bottom: 20px;">
-        <h1 style="margin: 0; font-size: 1.7rem;">Team Points Dashboard</h1>
-        <p style="color: var(--muted); margin: 4px 0 0;">Leaderboard, logs, tester & toggles</p>
-    </header>
 
-    <main class="card">
-        <div role="tablist">
-            <button role="tab" id="t-lb" aria-selected="true" onclick="setTab(0)">Leaderboard</button>
-            <button role="tab" id="t-tx" aria-selected="false" onclick="setTab(1)">Transactions</button>
-            <button role="tab" id="t-test" aria-selected="false" onclick="setTab(2)">Comment Tester</button>
-            <button role="tab" id="t-set" aria-selected="false" onclick="setTab(3)">Scoring Rules</button>
-        </div>
+	<div class="head-bar">
+		<div class="head-title">
+			<span class="icon-bolt">&#9889;</span>
+			<div>
+				<h1>Puanlar</h1>
+				<span>2026 18.iterasyon</span>
+			</div>
+		</div>
+		<button class="btn-refresh" onclick="refreshAll()" title="Yenile">&#x21bb;</button>
+	</div>
 
-        <!-- LEADERBOARD -->
-        <section id="p-lb" role="tabpanel">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <select id="lbPageSize" style="width: auto;" onchange="loadLb(1)">
-                    <option value="15">15 rows</option><option value="30">30 rows</option><option value="50">50 rows</option>
-                </select>
-                <button class="btn" onclick="loadLb(1)">Refresh</button>
-            </div>
-            <div id="lbTableWrap"></div>
-            <div id="lbPager" class="pager" hidden>
-                <span id="lbPageInfo"></span>
-                <div style="display:flex; gap:6px;">
-                    <button class="btn btn-sec" id="lbPrev" onclick="loadLb(lb.p - 1)">&larr;</button>
-                    <button class="btn btn-sec" id="lbNext" onclick="loadLb(lb.p + 1)">&rarr;</button>
-                </div>
-            </div>
-        </section>
+	<div class="dash-grid">
+		<div style="display:flex; flex-direction:column; gap:20px;">
+			<div class="profile-card">
+				<div class="user-meta-row">
+					<div class="rank-badge" id="myRankBadge">#1</div>
+					<div class="user-meta-text">
+						<h2 id="myUserName">Kullanıcı</h2>
+						<p id="myDailySummary">Bugün 0p &bull; 0.0h</p>
+					</div>
+				</div>
 
-        <!-- TRANSACTIONS -->
-        <section id="p-tx" role="tabpanel" hidden>
-            <form id="txForm" onsubmit="event.preventDefault(); loadTx(1);" class="flex-row">
-                <div><select id="txUser"><option value="">All users</option></select></div>
-                <div><input type="number" id="txItem" placeholder="Work item ID" min="0"></div>
-                <div>
-                    <select id="txSize">
-                        <option value="25">25 rows</option><option value="50">50 rows</option><option value="100">100 rows</option>
-                    </select>
-                </div>
-                <div style="flex:0;"><button class="btn" type="submit">Filter</button></div>
-            </form>
-            <div id="txTableWrap"></div>
-            <div id="txPager" class="pager" hidden>
-                <span id="txPageInfo"></span>
-                <div style="display:flex; gap:6px;">
-                    <button class="btn btn-sec" id="txPrev" onclick="loadTx(tx.p - 1)">&larr;</button>
-                    <button class="btn btn-sec" id="txNext" onclick="loadTx(tx.p + 1)">&rarr;</button>
-                </div>
-            </div>
-        </section>
+				<div class="btn-group">
+					<button class="pill-btn active" onclick="applyTimeScope('all', this)">Tüm zamanlar</button>
+					<button class="pill-btn" onclick="applyTimeScope('today', this)">Bugün</button>
+					<button class="pill-btn" onclick="applyTimeScope('7days', this)">Son 7 gün</button>
+					<button class="pill-btn" onclick="applyTimeScope('sprint', this)">Bu sprint</button>
+				</div>
 
-        <!-- TESTER -->
-        <section id="p-test" role="tabpanel" hidden>
-            <form onsubmit="runTester(event)">
-                <div style="margin-bottom:10px;"><input id="testTitle" value="Veritabani sema guncelleme" placeholder="Title"></div>
-                <div style="margin-bottom:10px;"><textarea id="testComment" rows="3" placeholder="Developer comment">Eski transaction tablosu revize edildi.</textarea></div>
-                <button class="btn" id="testBtn">Evaluate</button>
-            </form>
-            <div id="testRes" style="margin-top:14px; font-weight:600;" hidden></div>
-        </section>
+				<div class="big-score-wrap">
+					<div class="big-score-num" id="myFilteredPoints">0</div>
+					<div class="big-score-lbl" id="myScoreSubLabel">TÜM ŞİRKET &bull; TÜM ZAMANLAR</div>
+				</div>
 
-        <!-- SETTINGS -->
-        <section id="p-set" role="tabpanel" hidden>
-            <div id="togglesList"></div>
-            <p id="setStatus" style="color:var(--muted); font-size:.85rem; margin-top:8px;"></p>
-        </section>
-    </main>
+				<div class="sprint-footer">
+					<span>2026 18.iterasyon (2 Hafta)</span>
+					<span id="footerSprintRank">0p &bull; #1</span>
+				</div>
+			</div>
 
-    <!-- MODAL -->
-    <div id="userModal" class="modal" hidden onclick="if(event.target===this)closeModal()">
-        <div class="modal-box">
-            <div class="modal-head">
-                <div><h3 id="mUser" style="margin:0;"></h3><span id="mPts" style="color:var(--muted); font-size:.85rem;"></span></div>
-                <button class="m-close" onclick="closeModal()">&times;</button>
-            </div>
-            <div id="mList"></div>
-        </div>
-    </div>
+			<div class="rozetler-sec">
+				<div class="rozetler-title">Rozetler</div>
+				<div class="rozet-card-grid" id="rozetGrid"></div>
+			</div>
+		</div>
 
-    <script>
-    const API_BASE = "https://test.humn.tr"; // Your ASP.NET app URL
+		<div class="leader-card">
+			<div class="leader-head">
+				<span style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase;">Sıralama</span>
+				<div style="display:flex; align-items:center; gap:8px;">
+					<span class="leader-tag" id="leaderFilterTag">Tüm zamanlar</span>
+					<span class="leader-count" id="leaderTotalUsers">0 kişi</span>
+				</div>
+			</div>
 
-    // 2. Initialize the Azure DevOps Extension SDK
-    SDK.init({ applyTheme: true });
-    SDK.ready().then(() => {
-        SDK.notifyLoadSucceeded();
-    });
+			<div class="leader-list" id="topRankersList"></div>
+			<div class="divider-dots">&bull;&bull;&bull;</div>
+			<div class="leader-list" id="myRankRowContainer"></div>
 
-    const RANKS = {
-        mil: ['Albay', 'Tuğgeneral', 'Tümgeneral', 'Orgeneral', 'Genel Kurmay Başkanı'],
-        acad: ['Öğretim Görevlisi', 'Doktor', 'Doçent Doktor', 'Profesör Doktor', 'Ordinaryüs Profesör'],
-        v: ['v3', 'v6', 'v8', 'v10', 'v12']
-    };
-    const ICONS = { mil: '⚔️', acad: '🎓', v: '🏆', d_war: '🗡️', d_com: '💬' };
-    const escapeHtml = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const ptClass = n => n > 0 ? 'p-pos' : n < 0 ? 'p-neg' : 'p-zero';
+			<div style="margin-top:4px;">
+				<div style="font-size:0.75rem; color:var(--muted); margin-bottom:6px;">Son Sıralar</div>
+				<div class="leader-list" id="bottomRankersList"></div>
+			</div>
+		</div>
+	</div>
 
-    let lb = { p: 1, total: 1, data: [] }, tx = { p: 1, total: 1 };
-    const panels = ['p-lb', 'p-tx', 'p-test', 'p-set'].map(id => document.getElementById(id));
-    const tabs = ['t-lb', 't-tx', 't-test', 't-set'].map(id => document.getElementById(id));
+	<div class="details-collapsible">
+		<button class="details-trigger" onclick="toggleDetails()">
+			<span id="detailsToggleLabel">Detayları göster</span>
+			<span class="details-arrow" id="detailsArrow">&#9660;</span>
+		</button>
+		<div class="details-content" id="detailsPanel" hidden>
+			<div class="sub-tabs">
+				<div class="sub-tab-btn active" onclick="setSubTab(0, this)">Geçmiş</div>
+				<div class="sub-tab-btn" onclick="setSubTab(1, this)">İstatistik</div>
+				<div class="sub-tab-btn" onclick="setSubTab(2, this)">Reddedilen</div>
+				<div class="sub-tab-btn" onclick="setSubTab(3, this)">Yardım</div>
+			</div>
 
-    function setTab(idx) {
-        tabs.forEach((t, i) => {
-            const sel = i === idx;
-            t.setAttribute('aria-selected', sel);
-            panels[i].hidden = !sel;
-        });
-    }
+			<div id="subtab-gecmis" class="activity-list"></div>
 
-    function getBestMedals(list = []) {
-        let best = [];
-        const findBest = (arr, cls) => {
-            let maxIdx = -1, match = null;
-            list.forEach(m => {
-                let idx = arr.indexOf(m.type);
-                if (idx > maxIdx) { maxIdx = idx; match = m; }
-            });
-            if (match) best.push({ m: match, cls });
-        };
-        findBest(RANKS.mil, 'b-military');
-        findBest(RANKS.acad, 'b-academic');
-        findBest(RANKS.v, 'b-consistency');
-        return best;
-    }
+			<div id="subtab-istatistik" hidden>
+				<div class="stats-grid" id="statsGrid"></div>
+			</div>
 
-    async function loadLb(page = 1) {
-        lb.p = Math.max(1, page);
-        const sz = document.getElementById('lbPageSize').value;
-        const res = await fetch(`/api/leaderboard?page=${lb.p}&pageSize=${sz}`);
-        const data = await res.json();
-        lb.total = data.totalPages || 1;
-        lb.data = data.items || [];
+			<div id="subtab-reddedilen" class="activity-list" hidden></div>
 
-        const start = (lb.p - 1) * sz;
-        document.getElementById('lbTableWrap').innerHTML = `
-            <table>
-                <thead><tr><th style="width:50px">#</th><th>User</th><th style="width:100px">Points</th></tr></thead>
-                <tbody>${lb.data.map((u, i) => {
-                    const daily = (u.dailyBadges || []).map(b => `<span class="badge ${b.includes('Warrior') ? 'b-warrior' : 'b-commenter'}">${b}</span>`).join('');
-                    const best = getBestMedals(u.medals).map(x => `<span class="badge ${x.cls}" onclick="openModal(${u.id})">${x.m.type}</span>`).join('');
-                    return `<tr>
-                        <td>${start + i + 1}</td>
-                        <td>
-                            <div class="user-cell">
-                                <div>
-                                    <a href="#" style="color:inherit;font-weight:600;" onclick="event.preventDefault();openModal(${u.id})">${escapeHtml(u.userName)}</a>
-                                    <div class="badge-row" style="margin-top:4px;">${best}</div>
-                                </div>
-                                <div class="badge-col">${daily}</div>
-                            </div>
-                        </td>
-                        <td class="${ptClass(u.points)}">${u.points > 0 ? '+' : ''}${u.points}</td>
-                    </tr>`;
-                }).join('')}</tbody>
-            </table>`;
-        document.getElementById('lbPageInfo').innerText = `Page ${lb.p} of ${lb.total}`;
-        document.getElementById('lbPrev').disabled = lb.p <= 1;
-        document.getElementById('lbNext').disabled = lb.p >= lb.total;
-        document.getElementById('lbPager').hidden = lb.total <= 1;
-    }
+			<div id="subtab-yardim" hidden>
+				<div style="background:var(--card-sub); border:1px solid var(--border); border-radius:10px; padding:20px; font-size:0.88rem; line-height:1.7;">
+					<p style="color:#2dd4bf; font-weight:700; margin-bottom:6px;">&#128203; Puanlama Sistemi ve Kurallar:</p>
+					<ul style="padding-left:20px; color:#cbd5e1; margin-bottom:14px;">
+						<li><strong>Completed Work Artışı:</strong> Kendi görevinizde tamamlanan işi artırdığınızda: 1 saat = 1 puan (Günlük limit: 8 puan).</li>
+						<li><strong>Remaining Work Azalışı:</strong> Kalan işi düşürdüğünüzde: 1 saat = 1 puan (Günlük limit: 8 puan).</li>
+						<li><strong>Anlamlı Yorum:</strong> Kendi görevinize yazdığınız ilk anlamlı yoruma yapay zeka model değerlendirmesine göre en fazla 50 puan verilir. Kısa, spam veya anlamsız yorumlar puan alamaz.</li>
+						<li><strong>Görev Kapatma (State = Closed):</strong> Gün içinde completed work girilmiş bir görev kapatıldığında ek puan kazandırır.</li>
+						<li><strong>İterasyon Değişimi:</strong> Mevcut iterasyon dışına taşınan görevlerin puanı geri alınır.</li>
+					</ul>
+					<p style="color:#f59e0b; font-weight:700; margin-bottom:6px;">&#127942; Madalya ve Rütbeler:</p>
+					<ul style="padding-left:20px; color:#cbd5e1;">
+						<li><strong>Daily Warrior & Daily Commenter:</strong> Günün en çok puan toplayanı ve en çok yorum puanı alanı her gece madalya kazanır.</li>
+						<li><strong>Askeri Seri:</strong> Daily Warrior serisine göre (Albay &rarr; Tuğgeneral &rarr; Tümgeneral &rarr; Orgeneral &rarr; Efsane).</li>
+						<li><strong>Akademik Seri:</strong> Daily Commenter serisine göre (Öğr. Gör. &rarr; Doktor &rarr; Doçent &rarr; Profesör &rarr; Ordinaryüs).</li>
+						<li><strong>V-Serisi:</strong> En az 10 puan toplanan gün sayısına göre (v3: 5 gün, v6: 15 gün, v8: 45 gün, v10: 90 gün, v12: 150 gün).</li>
+					</ul>
+				</div>
+			</div>
+		</div>
+	</div>
 
-    function openModal(id) {
-        const u = lb.data.find(x => x.id === id);
-        if (!u) return;
-        document.getElementById('mUser').innerText = u.userName;
-        document.getElementById('mPts').innerText = `${u.points} Points`;
-        const list = u.medals || [];
-        
-        // Count daily wins
-        const dailyCounts = list.reduce((acc, m) => {
-            if (m.type === 'Daily Warrior' || m.type === 'Daily Commenter') acc[m.type] = (acc[m.type] || 0) + 1;
-            return acc;
-        }, {});
+	<div id="userModal" class="modal" hidden onclick="if(event.target===this)closeModal()">
+		<div class="modal-box">
+			<div class="modal-head">
+				<div>
+					<h3 id="mUser" style="margin:0;">Kullanıcı</h3>
+					<span id="mPts" style="color:var(--muted); font-size:0.85rem;">0 Points</span>
+				</div>
+				<button class="m-close" onclick="closeModal()">&times;</button>
+			</div>
+			<div id="mList"></div>
+		</div>
+	</div>
 
-        const segs = [
-            { t: '⚔️ Military Titles', items: list.filter(m => RANKS.mil.includes(m.type)) },
-            { t: '🎓 Academic Titles', items: list.filter(m => RANKS.acad.includes(m.type)) },
-            { t: '🏆 Consistency', items: list.filter(m => RANKS.v.includes(m.type)) }
-        ];
-
-        let html = segs.filter(s => s.items.length).map(s => `
-            <div class="seg"><div class="seg-title">${s.t}</div>
-                ${s.items.map(m => `<div class="medal-item"><strong>${escapeHtml(m.type)}</strong> <span>${escapeHtml(m.description)}</span></div>`).join('')}
-            </div>`).join('');
-
-        if (Object.keys(dailyCounts).length) {
-            html += `<div class="seg"><div class="seg-title">📜 Daily Victories</div><div class="badge-row">` +
-                Object.entries(dailyCounts).map(([type, cnt]) => `
-                    <span class="badge b-stacked">${type === 'Daily Warrior' ? '🗡️' : '💬'} ${type} <strong>&times;${cnt}</strong></span>
-                `).join('') + `</div></div>`;
-        }
-
-        document.getElementById('mList').innerHTML = html || '<p style="color:var(--muted);text-align:center;">No medals earned yet.</p>';
-        document.getElementById('userModal').hidden = false;
-    }
-
-    const closeModal = () => document.getElementById('userModal').hidden = true;
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-
-    async function loadTx(page = 1) {
-        tx.p = Math.max(1, page);
-        const u = document.getElementById('txUser').value, w = document.getElementById('txItem').value, sz = document.getElementById('txSize').value;
-        const res = await fetch(`/api/transactions?page=${tx.p}&pageSize=${sz}&user=${encodeURIComponent(u)}&workItemId=${w}`);
-        const data = await res.json();
-        tx.total = data.totalPages || 1;
-        document.getElementById('txTableWrap').innerHTML = `
-            <table><thead><tr><th>Time</th><th>User</th><th>Type</th><th>Pts</th><th>Task</th><th>Desc</th></tr></thead>
-            <tbody>${(data.items || []).map(t => `<tr>
-                <td>${new Date(t.timestamp).toLocaleDateString()}</td><td>${escapeHtml(t.userName)}</td><td>${escapeHtml(t.type)}</td>
-                <td class="${ptClass(t.deltaPoints)}">${t.deltaPoints > 0 ? '+' : ''}${t.deltaPoints}</td>
-                <td>${t.workItemId || '—'}</td><td>${escapeHtml(t.description)}</td>
-            </tr>`).join('')}</tbody></table>`;
-        document.getElementById('txPageInfo').innerText = `Page ${tx.p} of ${tx.total}`;
-        document.getElementById('txPrev').disabled = tx.p <= 1;
-        document.getElementById('txNext').disabled = tx.p >= tx.total;
-        document.getElementById('txPager').hidden = tx.total <= 1;
-    }
-
-    async function runTester(e) {
-        e.preventDefault();
-        const btn = document.getElementById('testBtn');
-        btn.disabled = true;
-        const res = await fetch('/api/test-score', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: document.getElementById('testTitle').value, comment: document.getElementById('testComment').value })
-        });
-        const d = await res.json();
-        const rBox = document.getElementById('testRes');
-        rBox.hidden = false;
-        rBox.style.color = d.passed ? '#34d399' : '#f87171';
-        rBox.innerText = `${d.passed ? '✅ Pass' : '❌ Fail'} — Score: ${d.score}/100`;
-        btn.disabled = false;
-    }
-
-    const TOGGLES = [
-        { k: 'commentsEnabled', l: 'Comment points' },
-        { k: 'completedWorkEnabled', l: 'Completed work points' },
-        { k: 'remainingWorkEnabled', l: 'Remaining work points' },
-        { k: 'stateChangedEnabled', l: 'Closing points' },
-        { k: 'iterationChangedEnabled', l: 'Iteration adjustment' }
-    ];
-
-    async function initSettings() {
-        const res = await fetch('/api/settings');
-        const data = await res.json();
-        document.getElementById('togglesList').innerHTML = TOGGLES.map(t => `
-            <div class="toggle-row"><span>${t.l}</span>
-                <label class="switch"><input type="checkbox" id="tog-${t.k}" ${data[t.k] ? 'checked' : ''} onchange="saveSettings()"></label>
-            </div>`).join('');
-    }
-
-    async function saveSettings() {
-        const payload = {};
-        TOGGLES.forEach(t => payload[t.k] = document.getElementById(`tog-${t.k}`).checked);
-        await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        document.getElementById('setStatus').innerText = 'Settings saved.';
-        setTimeout(() => document.getElementById('setStatus').innerText = '', 2000);
-    }
-
-    // Init
-    loadLb(1);
-    fetch('/api/users').then(r => r.json()).then(users => {
-        document.getElementById('txUser').innerHTML += users.map(u => `<option value="${escapeHtml(u)}">${escapeHtml(u)}</option>`).join('');
-    });
-    loadTx(1);
-    initSettings();
-    </script>
 </body>
 </html>

@@ -29,8 +29,8 @@ public class DailyMedalAwardBackgroundService : BackgroundService
 
     private static readonly FrozenDictionary<int, string> ConsistencyMilestones = new Dictionary<int, string>
     {
-        [1] = "v3",
-        [2] = "v6",
+        [5] = "v3",
+        [15] = "v6",
         [45] = "v8",
         [90] = "v10",
         [150] = "v12"
@@ -57,17 +57,23 @@ public class DailyMedalAwardBackgroundService : BackgroundService
             await Task.Delay(delay, stoppingToken);
 
             try
-            {
-                using var scope = _serviceProvider.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+			{
+				await Task.Delay(delay, stoppingToken);
 
-                var yesterday = DateTime.UtcNow.Date.AddDays(-1);
-                await AwardDailyMedalsForDateAsync(db, yesterday);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error while processing end-of-day medals.");
-            }
+				using var scope = _serviceProvider.CreateScope();
+				var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+				var yesterday = DateTime.UtcNow.Date.AddDays(-1);
+				await AwardDailyMedalsForDateAsync(db, yesterday);
+			}
+			catch (OperationCanceledException)
+			{
+				break;
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, "Error while processing end-of-day medals.");
+			}
         }
     }
 

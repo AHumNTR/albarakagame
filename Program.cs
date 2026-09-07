@@ -19,12 +19,21 @@ builder.Services.AddHttpClient("IterationClient", client =>
 
     client.BaseAddress = new Uri("https://dev.azure.com/albarakatech/");
     client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-    // TODO: move this token out of source control (user-secrets / env var / Key Vault) and rotate it.
     string token = "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
     client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
 }
 );
+
+builder.Services.AddCors(options =>
+{
+	options.AddPolicy("DevOpsCors", policy =>
+	{
+		policy.SetIsOriginAllowed(_ => true)
+			.AllowAnyHeader()
+			.AllowAnyMethod();
+	});
+});
 builder.Services.AddHostedService<IterationSyncBackgroundService>();
 builder.Services.AddHostedService<DailyMedalAwardBackgroundService>();
 builder.Services.AddSingleton(sp =>
@@ -44,6 +53,7 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
+app.UseCors("DevOpsCors");
 app.MapGet("/evaluate-test-file", async (ZeroShotCommentClassifier classifier) =>
 {
     var items = new List<TestCaseItem>();
@@ -106,7 +116,7 @@ app.MapPost("/workitemupdated", async (JsonNode payload, AppDbContext db) =>
 
     // 1. Ensure user exists before processing any transactions
     var user = await GetOrCreateUserAsync(db, editorUser);
-    var todayUtc = DateTime.Today;
+    var todayUtc = DateTime.UtcNow.Date;
 
     // 2. Handle Iteration Update
     if (fields["System.IterationPath"] != null)
@@ -300,10 +310,6 @@ app.MapPost("/commentadded", async (JsonNode payload, AppDbContext db, ZeroShotC
 
     var user = await GetOrCreateUserAsync(db, editorUser);
 
-    var meaningfulRegex = new Regex(
-    @"^(?!\b(done|ok|okay|fixed|tested|wip|lgtm|\+1|asdf|test)\b$)(?=(?:.*\b[a-zA-Z]{2,}\b){4,}).{15,}$",
-    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant
-    );
 
     var transaction = new PointTransaction
     {
@@ -372,150 +378,138 @@ app.MapPost("/api/test-score", async (TestRequest req, ZeroShotCommentClassifier
 // Dashboard data APIs
 // ---------------------------------------------------------------------
 
-app.MapGet("/api/leaderboard", async (AppDbContext db, int page = 1, int pageSize = 15) =>
+app.MapGet("/api/leaderboard", async (
+	HttpContext httpContext,
+	AppDbContext db,
+	IHttpClientFactory httpClientFactory,
+	int page = 1,
+	int pageSize = 15) =>
 {
-    page = Math.Max(1, page);
-    pageSize = Math.Clamp(pageSize, 1, 100);
-    var todayUtc = DateTime.UtcNow.Date;
+	page = Math.Max(1, page);
+	pageSize = Math.Clamp(pageSize, 1, 100);
+	var todayUtc = DateTime.UtcNow.Date;
 
-    // 1. Fetch today's transactions for the live daily badges
-    var todayTransactions = await db.Transactions
-        .AsNoTracking()
-        .Where(t => t.Timestamp >= todayUtc)
-        .Select(t => new { t.UserId, t.DeltaPoints, t.Type })
-        .ToListAsync();
+	var caller = await GetCallerIdentityAsync(httpContext, httpClientFactory);
 
-    var topWarriorUserId = todayTransactions
-        .GroupBy(t => t.UserId)
-        .Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
-        .Where(x => x.Total > 0)
-        .OrderByDescending(x => x.Total)
-        .Select(x => (int?)x.UserId)
-        .FirstOrDefault();
+	var todayTransactions = await db.Transactions
+		.AsNoTracking()
+		.Where(t => t.Timestamp >= todayUtc)
+		.Select(t => new { t.UserId, t.DeltaPoints, t.Type })
+		.ToListAsync();
 
-    var topCommenterUserId = todayTransactions
-        .Where(t => t.Type == "Comment Added")
-        .GroupBy(t => t.UserId)
-        .Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
-        .Where(x => x.Total > 0)
-        .OrderByDescending(x => x.Total)
-        .Select(x => (int?)x.UserId)
-        .FirstOrDefault();
+	var topWarriorUserId = todayTransactions
+		.GroupBy(t => t.UserId)
+		.Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
+		.Where(x => x.Total > 0)
+		.OrderByDescending(x => x.Total)
+		.Select(x => (int?)x.UserId)
+		.FirstOrDefault();
 
-    // 2. Query paginated users
-    var query = db.Users
-        .OrderByDescending(u => u.Points)
-        .ThenBy(u => u.UserName);
+	var topCommenterUserId = todayTransactions
+		.Where(t => t.Type == "Comment Added")
+		.GroupBy(t => t.UserId)
+		.Select(g => new { UserId = g.Key, Total = g.Sum(x => x.DeltaPoints) })
+		.Where(x => x.Total > 0)
+		.OrderByDescending(x => x.Total)
+		.Select(x => (int?)x.UserId)
+		.FirstOrDefault();
 
-    var totalCount = await query.CountAsync();
-    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+	var query = db.Users.OrderByDescending(u => u.Points).ThenBy(u => u.UserName);
+	var totalCount = await query.CountAsync();
+	var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-    var users = await query
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(u => new { u.Id, u.UserName, u.Points })
-        .ToListAsync();
+	var users = await query
+		.Skip((page - 1) * pageSize)
+		.Take(pageSize)
+		.Select(u => new { u.Id, u.UserName, u.Points })
+		.ToListAsync();
 
-    var userIds = users.Select(u => u.Id).ToList();
+	var userIds = users.Select(u => u.Id).ToList();
 
-    // 3. Batch load permanent medals for the users on the current page
-    var userMedals = await db.Medals
-        .AsNoTracking()
-        .Where(m => userIds.Contains(m.UserId))
-        .OrderByDescending(m => m.Timestamp)
-        .Select(m => new { m.UserId, m.Type, m.Description, m.Timestamp })
-        .ToListAsync();
+	var userMedals = await db.Medals
+		.AsNoTracking()
+		.Where(m => userIds.Contains(m.UserId))
+		.OrderByDescending(m => m.Timestamp)
+		.Select(m => new { m.UserId, m.Type, m.Description, m.Timestamp })
+		.ToListAsync();
 
-    var medalGroup = userMedals
-        .GroupBy(m => m.UserId)
-        .ToDictionary(g => g.Key, g => g.ToList());
+	var medalGroup = userMedals.GroupBy(m => m.UserId).ToDictionary(g => g.Key, g => g.ToList());
 
-    // 4. Combine into final DTO
-    var items = users.Select(u =>
-    {
-        var dailyBadges = new List<string>();
-        if (topWarriorUserId.HasValue && u.Id == topWarriorUserId.Value)
-            dailyBadges.Add("⚔️ Daily Warrior");
-        if (topCommenterUserId.HasValue && u.Id == topCommenterUserId.Value)
-            dailyBadges.Add("💬 Daily Commenter");
+	var items = users.Select(u =>
+	{
+		bool isCaller = !string.IsNullOrEmpty(caller) && u.UserName.Contains(caller, StringComparison.OrdinalIgnoreCase);
 
-        var permanent = medalGroup.TryGetValue(u.Id, out var mList) ? mList : new();
+		var dailyBadges = new List<string>();
+		if (topWarriorUserId.HasValue && u.Id == topWarriorUserId.Value)
+			dailyBadges.Add("⚔️ Daily Warrior");
+		if (topCommenterUserId.HasValue && u.Id == topCommenterUserId.Value)
+			dailyBadges.Add("💬 Daily Commenter");
 
-        return new
-        {
-            id = u.Id,
-            userName = u.UserName,
-            points = u.Points,
-            dailyBadges,
-            medals = permanent.Select(m => new
-            {
-                type = m.Type,
-                description = m.Description,
-                date = m.Timestamp.ToString("yyyy-MM-dd")
-            })
-        };
-    });
+		var permanent = medalGroup.TryGetValue(u.Id, out var mList) ? mList : new();
 
-    return Results.Ok(new
-    {
-        items,
-        totalCount,
-        page,
-        pageSize,
-        totalPages
-    });
+		return new
+		{
+			id = u.Id,
+			userName = isCaller ? u.UserName : MaskUserName(u.UserName),
+			points = u.Points,
+			dailyBadges,
+			medals = permanent.Select(m => new
+			{
+				type = m.Type,
+				description = m.Description,
+				date = m.Timestamp.ToString("yyyy-MM-dd")
+			})
+		};
+	});
+
+	return Results.Ok(new { items, totalCount, page, pageSize, totalPages });
 });
 
 app.MapGet("/api/transactions", async (
-    AppDbContext db, 
-    string? user, 
-    string? workItemId, 
-    int page = 1, 
-    int pageSize = 20) =>
+	HttpContext httpContext,
+	AppDbContext db,
+	IHttpClientFactory httpClientFactory,
+	string? workItemId,
+	int page = 1,
+	int pageSize = 20) =>
 {
-    page = Math.Max(1, page);
-    pageSize = Math.Clamp(pageSize, 1, 100);
+	page = Math.Max(1, page);
+	pageSize = Math.Clamp(pageSize, 1, 100);
 
-    var query = db.Transactions
-        .Include(t => t.User)
-        .OrderByDescending(t => t.Timestamp)
-        .AsQueryable();
+	var caller = await GetCallerIdentityAsync(httpContext, httpClientFactory);
 
-    if (!string.IsNullOrWhiteSpace(user))
-        query = query.Where(t => t.User != null && t.User.UserName == user);
+	var query = db.Transactions
+		.Include(t => t.User)
+		.OrderByDescending(t => t.Timestamp)
+		.AsQueryable();
 
-    // Safely parse workItemId only if a non-empty string was supplied
-    if (!string.IsNullOrWhiteSpace(workItemId) && int.TryParse(workItemId, out int parsedId))
-    {
-        query = query.Where(t => t.WorkItemId == parsedId);
-    }
+	if (!string.IsNullOrEmpty(caller))
+		query = query.Where(t => t.User != null && t.User.UserName.Contains(caller));
+	else
+		return Results.Ok(new { items = Array.Empty<object>(), totalCount = 0, page, pageSize, totalPages = 0 });
 
-    var totalCount = await query.CountAsync();
-    var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+	if (!string.IsNullOrWhiteSpace(workItemId) && int.TryParse(workItemId, out int parsedId))
+		query = query.Where(t => t.WorkItemId == parsedId);
 
-    var results = await query
-        .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-        .Select(t => new
-        {
-            t.Id,
-            UserName = t.User != null ? t.User.UserName : "(unknown)",
-            t.Type,
-            t.DeltaPoints,
-            t.WorkItemId,
-            t.Description,
-            t.Timestamp
-        })
-        .ToListAsync();
+	var totalCount = await query.CountAsync();
+	var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
 
-    return Results.Ok(new
-    {
-        items = results,
-        totalCount,
-        page,
-        pageSize,
-        totalPages
-    });
+	var results = await query
+		.Skip((page - 1) * pageSize)
+		.Take(pageSize)
+		.Select(t => new
+		{
+			t.Id,
+			UserName = t.User != null ? t.User.UserName : "(unknown)",
+			t.Type,
+			t.DeltaPoints,
+			t.WorkItemId,
+			t.Description,
+			t.Timestamp
+		})
+		.ToListAsync();
+
+	return Results.Ok(new { items = results, totalCount, page, pageSize, totalPages });
 });
 
 app.MapGet("/api/users", async (AppDbContext db) =>
@@ -594,8 +588,34 @@ app.MapGet("/", async (AppDbContext db) =>
         );
 app.Run();
 
+static async Task<string?> GetCallerIdentityAsync(HttpContext context, IHttpClientFactory httpClientFactory)
+{
+	var authHeader = context.Request.Headers.Authorization.ToString();
+	if (string.IsNullOrWhiteSpace(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+		return null;
 
+	var token = authHeader["Bearer ".Length..].Trim();
+	var client = httpClientFactory.CreateClient();
+	client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
+	try
+	{
+		using var res = await client.GetAsync("https://vssps.dev.azure.com/albarakatech/_apis/profile/profiles/me?api-version=7.1-preview");
+		if (!res.IsSuccessStatusCode) return null;
+		var json = await res.Content.ReadFromJsonAsync<JsonNode>();
+		return json?["displayName"]?.ToString() ?? json?["emailAddress"]?.ToString();
+	}
+	catch
+	{
+		return null;
+	}
+}
+static string MaskUserName(string name)
+{
+	var clean = Regex.Replace(name, @"<[^>]+>", "").Trim();
+	var parts = clean.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+	return string.Join(" ", parts.Select(p => p[0] + "***"));
+}
 static async Task<User> GetOrCreateUserAsync(AppDbContext db, string userName)
 {
     var user = await db.Users.FirstOrDefaultAsync(u => u.UserName == userName);
