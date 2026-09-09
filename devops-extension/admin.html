@@ -1,109 +1,137 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Admin Giriş</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-	:root { --bg: #0d1117; --card: #161b22; --card-2: #1c2129; --border: #2a303c; --text: #e6edf3; --muted: #8b949e; --accent: #8b7cf6; --accent-h: #a599ff; --green: #3fb950; --red: #f85149; }
-	* { box-sizing: border-box; }
-	body { margin: 0; font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); }
-	.wrap { max-width: 760px; margin: 0 auto; padding: 24px 18px 60px; }
-	h1 { font-size: 1.25rem; margin: 0 0 4px; }
-	.sub { color: var(--muted); font-size: .85rem; margin-bottom: 20px; }
-	.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 18px; }
-	.card h2 { font-size: .95rem; margin: 0 0 14px; }
-	label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 6px; }
-	input, textarea { width: 100%; background: var(--card-2); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 7px; font-family: inherit; font-size: .88rem; margin-bottom: 14px; }
-	textarea { resize: vertical; }
-	.btn { background: var(--accent); border: none; color: #fff; padding: 9px 18px; border-radius: 7px; font-weight: 600; cursor: pointer; font-size: .85rem; }
-	.btn:hover { background: var(--accent-h); }
-	.btn:disabled { opacity: .5; cursor: not-allowed; }
-	#testRes { margin-top: 14px; font-weight: 700; font-size: .9rem; }
-	.toggle-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: .88rem; }
-	.toggle-row:last-child { border-bottom: none; }
-	.switch { position: relative; width: 42px; height: 22px; }
-	.switch input { position: absolute; inset: 0; appearance: none; background: var(--border); border-radius: 99px; cursor: pointer; margin: 0; }
-	.switch input:checked { background: var(--accent); }
-	.switch input::before { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: .15s; }
-	.switch input:checked::before { transform: translateX(20px); }
-	#setStatus { color: var(--muted); font-size: .8rem; margin-top: 10px; height: 1em; }
-</style>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>Yönetici Paneli</title>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="dashboard.css">
+	<script>
+		window.define = function(deps, factory) {
+			const fn = typeof deps === 'function' ? deps : factory;
+			const exp = {};
+			const res = fn ? fn(exp, exp) : null;
+			window.SDK = (res && Object.keys(res).length > 0) ? res : exp;
+		};
+		window.define.amd = true;
+	</script>
+	<script src="lib/SDK.min.js"></script>
+	<script src="admin.js" defer></script>
 </head>
 <body>
-<div class="wrap">
-	<h1>🔐 Admin Giriş</h1>
-	<div class="sub">Puanlama kurallarını test et ve aç/kapat.</div>
 
-	<div class="card">
-		<h2>Yorum Test Aracı</h2>
-		<label for="testTitle">Görev başlığı</label>
-		<input id="testTitle" value="Veritabanı şema güncelleme" placeholder="Başlık">
-		<label for="testComment">Geliştirici yorumu</label>
-		<textarea id="testComment" rows="3" placeholder="Yorum">Eski transaction tablosu revize edildi.</textarea>
-		<button class="btn" id="testBtn" onclick="runTester()">Değerlendir</button>
-		<div id="testRes" hidden></div>
+	<div class="head-bar">
+		<div class="head-title">
+			<span class="icon-bolt">&#9881;</span>
+			<div>
+				<h1>Yönetici Paneli</h1>
+				<span>Gamemaster Kontrolleri & Sistem Ayarları</span>
+			</div>
+		</div>
+		<button class="btn-refresh" onclick="window.location.href='dashboard.html'" title="Panele Dön">&larr; Geri Dön</button>
 	</div>
 
-	<div class="card">
-		<h2>Puanlama Kuralları</h2>
-		<div id="togglesList"><div style="color:var(--muted); font-size:.85rem;">Yükleniyor…</div></div>
-		<p id="setStatus"></p>
+	<!-- Ekip Yönetimi -->
+	<div class="profile-card" style="gap: 16px;">
+		<h2 style="font-size: 1rem; font-weight: 700;">Ekip Yönetimi</h2>
+		<div style="display: flex; align-items: center; gap: 12px;">
+			<button class="btn-refresh" onclick="syncTeam()" id="btnSync">
+				&#x21bb; Ekip Üyelerini Senkronize Et
+			</button>
+			<span id="syncResult" style="font-size: 0.85rem; color: var(--muted);"></span>
+		</div>
 	</div>
-</div>
 
-<script>
-const API_BASE = "https://test.humn.tr";
+	<!-- Puanlama Kural Ayarları -->
+	<div class="profile-card" style="margin-top: 20px; gap: 16px;">
+		<div style="display:flex; justify-content:space-between; align-items:center;">
+			<h2 style="font-size: 1rem; font-weight: 700;">Puanlama Kural Ayarları</h2>
+			<button class="btn-refresh" onclick="saveSettings()" id="btnSaveSettings">&#128190; Ayarları Kaydet</button>
+		</div>
+		<p style="font-size: 0.82rem; color: var(--muted); line-height: 1.4;">
+			Aktif veya pasif yapılan puanlama kuralları anında tüm sisteme uygulanır.
+		</p>
+		<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+			<label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+				<input type="checkbox" id="settingComments" style="accent-color: var(--accent); width: 16px; height: 16px;">
+				<span>Yorum Puanlaması</span>
+			</label>
+			<label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+				<input type="checkbox" id="settingCompleted" style="accent-color: var(--accent); width: 16px; height: 16px;">
+				<span>Completed Work Artışı</span>
+			</label>
+			<label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+				<input type="checkbox" id="settingRemaining" style="accent-color: var(--accent); width: 16px; height: 16px;">
+				<span>Remaining Work Azalışı</span>
+			</label>
+			<label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+				<input type="checkbox" id="settingState" style="accent-color: var(--accent); width: 16px; height: 16px;">
+				<span>Görev Kapatma (Closed)</span>
+			</label>
+			<label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; cursor: pointer;">
+				<input type="checkbox" id="settingIteration" style="accent-color: var(--accent); width: 16px; height: 16px;">
+				<span>İterasyon Değişimi Kontrolü</span>
+			</label>
+		</div>
+		<div id="settingsResult" style="font-size: 0.85rem; color: var(--muted);"></div>
+	</div>
 
-const TOGGLES = [
-	{ k: 'commentsEnabled', l: 'Yorum puanları' },
-	{ k: 'completedWorkEnabled', l: 'Tamamlanan iş puanları' },
-	{ k: 'remainingWorkEnabled', l: 'Kalan iş puanları' },
-	{ k: 'stateChangedEnabled', l: 'Kapanış puanları' },
-	{ k: 'iterationChangedEnabled', l: 'İterasyon düzeltmesi' }
-];
+	<!-- Canlı Yorum Testi -->
+	<div class="profile-card" style="margin-top: 20px; gap: 16px;">
+		<h2 style="font-size: 1rem; font-weight: 700;">Yorum Puanlama Testi</h2>
+		<p style="font-size: 0.82rem; color: var(--muted); line-height: 1.4;">
+			Bir görev başlığı ve yorum girerek yapay zeka modelinin hesaplayacağı skoru ve geçme durumunu canlı olarak test edin.
+		</p>
+		<div style="display: flex; flex-direction: column; gap: 10px;">
+			<input type="text" id="testCommentTitle" placeholder="Görev Başlığı (Örn: Refactor Auth Service)" style="background: var(--card-sub); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 0.85rem;">
+			<textarea id="testCommentBody" rows="3" placeholder="Yorum metnini girin..." style="background: var(--card-sub); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 0.85rem; resize: vertical;"></textarea>
+			<div style="display: flex; align-items: center; gap: 12px;">
+				<button class="btn-refresh" onclick="testCommentScore()" id="btnTestComment">&#9654; Skoru Hesapla</button>
+				<div id="testCommentResult" style="font-size: 0.85rem;"></div>
+			</div>
+		</div>
+	</div>
 
-async function runTester() {
-	const btn = document.getElementById('testBtn');
-	btn.disabled = true;
-	try {
-		const res = await fetch(`${API_BASE}/api/test-score`, {
-			method: 'POST', headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ title: document.getElementById('testTitle').value, comment: document.getElementById('testComment').value })
-		});
-		const d = await res.json();
-		const box = document.getElementById('testRes');
-		box.hidden = false;
-		box.style.color = d.passed ? 'var(--green)' : 'var(--red)';
-		box.innerText = `${d.passed ? '✅ Geçti' : '❌ Geçemedi'} — Skor: ${d.score}/100`;
-	} finally {
-		btn.disabled = false;
-	}
-}
+	<!-- Yapay Zeka Modeli Eğitimi -->
+	<div class="profile-card" style="margin-top: 20px; gap: 16px;">
+		<h2 style="font-size: 1rem; font-weight: 700;">Yapay Zeka Modeli Eğitimi</h2>
+		<p style="font-size: 0.82rem; color: var(--muted); line-height: 1.5;">
+			Veri setine eklenen yeni etiketlerle ModernBERT modelini yeniden eğitir, ONNX formatına aktarır ve yayına alır.
+		</p>
+		<div style="display: flex; align-items: center; gap: 12px;">
+			<button class="btn-refresh" onclick="trainModel()" id="btnTrain">
+				&#9881; Modeli Eğit & Dağıt
+			</button>
+			<span id="trainResult" style="font-size: 0.85rem; color: var(--muted);"></span>
+		</div>
+	</div>
 
-async function initSettings() {
-	try {
-		const res = await fetch(`${API_BASE}/api/settings`);
-		const data = await res.json();
-		document.getElementById('togglesList').innerHTML = TOGGLES.map(t => `
-			<div class="toggle-row"><span>${t.l}</span>
-				<label class="switch"><input type="checkbox" id="tog-${t.k}" ${data[t.k] ? 'checked' : ''} onchange="saveSettings()"></label>
-			</div>`).join('');
-	} catch (e) {
-		document.getElementById('togglesList').innerHTML = '<div style="color:var(--red); font-size:.85rem;">Ayarlar yüklenemedi.</div>';
-	}
-}
+	<!-- Yorum Değerlendirmeleri & Veri Seti -->
+	<div class="profile-card" style="margin-top: 20px; gap: 16px;">
+		<div style="display:flex; justify-content:space-between; align-items:center;">
+			<h2 style="font-size: 1rem; font-weight: 700;">Yorum Değerlendirmeleri & Veri Seti Eğitimi</h2>
+			<button class="btn-refresh" onclick="loadAdminComments()">&#x21bb; Yenile</button>
+		</div>
 
-async function saveSettings() {
-	const payload = {};
-	TOGGLES.forEach(t => payload[t.k] = document.getElementById(`tog-${t.k}`).checked);
-	await fetch(`${API_BASE}/api/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-	document.getElementById('setStatus').innerText = 'Ayarlar kaydedildi.';
-	setTimeout(() => document.getElementById('setStatus').innerText = '', 2000);
-}
+		<div style="overflow-x: auto;">
+			<table style="width:100%; border-collapse: collapse; font-size: 0.85rem; color: #cbd5e1;">
+				<thead>
+					<tr style="border-bottom: 1px solid var(--border); text-align: left; color: var(--muted);">
+						<th style="padding: 10px;">ID & Görev</th>
+						<th style="padding: 10px;">Yorum</th>
+						<th style="padding: 10px; width: 100px;">Model Skoru</th>
+						<th style="padding: 10px; width: 120px;">Düzeltilmiş (1-5)</th>
+						<th style="padding: 10px; width: 150px; text-align: right;">İşlem</th>
+					</tr>
+				</thead>
+				<tbody id="commentsTableBody">
+					<tr>
+						<td colspan="5" style="text-align:center; padding: 20px; color: var(--muted);">Yükleniyor...</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</div>
 
-initSettings();
-</script>
 </body>
 </html>

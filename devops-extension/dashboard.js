@@ -42,16 +42,7 @@ function toggleDetails() {
 	document.getElementById('detailsToggleLabel').innerText = detailsOpen ? 'Detayları gizle' : 'Detayları göster';
 	document.getElementById('detailsArrow').innerHTML = detailsOpen ? '&#9650;' : '&#9660;';
 }
-// Admin Panel Modal Controls
-function openAdminPanel() {
-	const modal = document.getElementById('adminModal');
-	if (modal) modal.removeAttribute('hidden');
-}
 
-function closeAdminModal() {
-	const modal = document.getElementById('adminModal');
-	if (modal) modal.setAttribute('hidden', '');
-}
 
 // Check admin membership from the backend
 async function checkAdminStatus() {
@@ -79,6 +70,45 @@ async function checkAdminStatus() {
 		}
 	} catch (e) {
 		console.error("Admin yetki kontrolü başarısız:", e);
+	}
+}
+async function trainModel() {
+	const btn = document.getElementById('btnTrain');
+	const label = document.getElementById('trainResult');
+	if (btn) btn.disabled = true;
+	if (label) {
+		label.style.color = 'var(--muted)';
+		label.innerText = 'Eğitim başlatıldı, bu işlem birkaç dakika sürebilir...';
+	}
+
+	const token = await getAuthToken();
+	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+	try {
+		const res = await fetch(`${API_BASE}/api/admin/train-model`, {
+			method: 'POST',
+			headers
+		});
+		const data = await res.json();
+
+		if (res.ok) {
+			if (label) {
+				label.style.color = '#2dd4bf';
+				label.innerText = data.message || 'Model başarıyla eğitildi ve yüklendi!';
+			}
+		} else {
+			if (label) {
+				label.style.color = '#f87171';
+				label.innerText = data.message || data.detail || 'Eğitim başarısız oldu.';
+			}
+		}
+	} catch (err) {
+		if (label) {
+			label.style.color = '#f87171';
+			label.innerText = 'Sunucuya bağlanılamadı veya işlem zaman aşımına uğradı.';
+		}
+	} finally {
+		if (btn) btn.disabled = false;
 	}
 }
 // Subtabs

@@ -1,7 +1,7 @@
 {
   "manifestVersion": 1,
   "id": "team-points-gamification",
-  "version": "1.2.0",
+  "version": "1.8.0",
   "name": "Team Points Dashboard",
   "description": "Gamified team leaderboard, scoring, and medals dashboard.",
   "publisher": "KeremKupeli",
@@ -22,6 +22,14 @@
   "files": [
     {
       "path": "dashboard.html",
+      "addressable": true
+    },
+    {
+      "path": "admin.html",
+      "addressable": true
+    },
+    {
+      "path": "admin.js",
       "addressable": true
     },
     {
