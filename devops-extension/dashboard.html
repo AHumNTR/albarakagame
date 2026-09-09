@@ -25,10 +25,13 @@
 			<span class="icon-bolt">&#9889;</span>
 			<div>
 				<h1>Puanlar</h1>
-				<span>2026 18.iterasyon</span>
+				<span id ="headIterationLabel">2026 18.iterasyon</span>
 			</div>
 		</div>
-		<button class="btn-refresh" onclick="refreshAll()" title="Yenile">&#x21bb;</button>
+		<div style="display:flex; align-items:center; gap:8px;">
+			<button class="btn-refresh" id="btnAdmin" onclick="openAdminPanel()" style="display:none;" title="Yönetici Paneli">&#9881; Yönetici</button>
+			<button class="btn-refresh" onclick="refreshAll()" title="Yenile">&#x21bb;</button>
+		</div>
 	</div>
 
 	<div class="dash-grid">
@@ -55,7 +58,7 @@
 				</div>
 
 				<div class="sprint-footer">
-					<span>2026 18.iterasyon (2 Hafta)</span>
+					<span id="footerIterationLabel">2026 18.iterasyon (2 Hafta)</span>
 					<span id="footerSprintRank">0p &bull; #1</span>
 				</div>
 			</div>
@@ -146,6 +149,21 @@
 				<button class="m-close" onclick="closeModal()">&times;</button>
 			</div>
 			<div id="mList"></div>
+		</div>
+	</div>
+	<div id="adminModal" class="modal" hidden onclick="if(event.target===this)closeAdminModal()">
+		<div class="modal-box" style="max-width:650px;">
+			<div class="modal-head">
+				<div>
+					<h3 style="margin:0;">Yönetici Paneli</h3>
+					<span style="color:var(--muted); font-size:0.85rem;">Gamemaster Kontrolleri & Sistem Ayarları</span>
+				</div>
+				<button class="m-close" onclick="closeAdminModal()">&times;</button>
+			</div>
+			<div id="adminPanelContent" style="padding:16px 0; color:var(--muted); font-size:0.9rem; min-height:140px;">
+				<!-- Blank panel placeholder -->
+				<p style="text-align:center; padding:20px 0;">Yönetici paneli hazır.</p>
+			</div>
 		</div>
 	</div>
 

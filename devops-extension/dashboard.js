@@ -1,9 +1,4 @@
-const DEV_TOKEN = "EhTXhaCadc2UCtYkNLXa2c1HWHCCkjPbKLMzqhgzm53FAILIOh2SJQQJ99CHACAAAAAWcGBqAAASAZDO2hLF";
 const API_BASE = "https://test.humn.tr";
-const DEV_USER = {
-	displayName: "kerem kupeli",
-	email: "kupeli24@itu.edu.tr"
-};
 const RANKS = {
 	mil: ['Albay', 'Tuğgeneral', 'Tümgeneral', 'Orgeneral', 'Genel Kurmay Başkanı'],
 	acad: ['Öğretim Görevlisi', 'Doktor', 'Doçent Doktor', 'Profesör Doktor', 'Ordinaryüs Profesör'],
@@ -16,7 +11,7 @@ let myUserTransactions = [];
 let currentUser = null;
 let currentTimeFilter = 'all';
 let devopsUser = null;
-let currentIteration=null
+let currentIteration = null;
 
 const escapeHtml = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -47,7 +42,45 @@ function toggleDetails() {
 	document.getElementById('detailsToggleLabel').innerText = detailsOpen ? 'Detayları gizle' : 'Detayları göster';
 	document.getElementById('detailsArrow').innerHTML = detailsOpen ? '&#9650;' : '&#9660;';
 }
+// Admin Panel Modal Controls
+function openAdminPanel() {
+	const modal = document.getElementById('adminModal');
+	if (modal) modal.removeAttribute('hidden');
+}
 
+function closeAdminModal() {
+	const modal = document.getElementById('adminModal');
+	if (modal) modal.setAttribute('hidden', '');
+}
+
+// Check admin membership from the backend
+async function checkAdminStatus() {
+	let token = '';
+	if (window.SDK && typeof SDK.getAccessToken === 'function') {
+		try {
+			token = await Promise.race([
+				SDK.getAccessToken(),
+				new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
+			]);
+		} catch (e) {
+			token = '';
+		}
+	}
+	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+	try {
+		const res = await fetch(`${API_BASE}/api/admin/check`, { headers });
+		if (!res.ok) return;
+		const data = await res.json();
+
+		const adminBtn = document.getElementById('btnAdmin');
+		if (adminBtn) {
+			adminBtn.style.display = data.isAdmin ? 'inline-flex' : 'none';
+		}
+	} catch (e) {
+		console.error("Admin yetki kontrolü başarısız:", e);
+	}
+}
 // Subtabs
 const subtabs = ['subtab-gecmis', 'subtab-istatistik', 'subtab-reddedilen', 'subtab-yardim'];
 function setSubTab(idx, btn) {
@@ -61,7 +94,6 @@ function setSubTab(idx, btn) {
 		}
 	});
 }
-
 // Time Filtering Logic
 async function applyTimeScope(scope, btn) {
 	currentTimeFilter = scope;
@@ -79,12 +111,11 @@ async function applyTimeScope(scope, btn) {
 				new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
 			]);
 		} catch (e) {
-			token = DEV_TOKEN;
+			token = '';
 		}
 	}
-	token = token || DEV_TOKEN;
-	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
+	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 	const lbRes = await fetch(`${API_BASE}/api/leaderboard?scope=${scope}&page=1&pageSize=100`, { headers });
 	const lbData = await lbRes.json();
 	cachedUsers = lbData.items || [];
@@ -92,7 +123,7 @@ async function applyTimeScope(scope, btn) {
 	renderDynamicViews();
 }
 
-function isTransactionInScope(txDate, scope,iteration) {
+function isTransactionInScope(txDate, scope, iteration) {
 	if (scope === 'all') return true;
 	const now = new Date();
 	const t = new Date(txDate);
@@ -105,7 +136,7 @@ function isTransactionInScope(txDate, scope,iteration) {
 		return diffDays >= 0 && diffDays <= 7;
 	}
 	if (scope === 'sprint') {
-		return iteration===currentIteration;
+		return iteration === currentIteration;
 	}
 	return true;
 }
@@ -126,11 +157,10 @@ function resolveCurrentUser(users) {
 	const unmasked = users.find(u => u.userName && !u.userName.includes('***'));
 	if (unmasked) return unmasked;
 
-	// 2. Fall back to DevOps SDK context or DEV_USER
-	const target = devopsUser || DEV_USER;
-	if (target) {
-		const targetEmail = extractEmail(target.email || target.name || target.uniqueName || '');
-		const targetDisplayName = cleanDisplayName(target.displayName || target.name || '').toLowerCase();
+	// 2. Fall back to DevOps SDK context if available
+	if (devopsUser) {
+		const targetEmail = extractEmail(devopsUser.email || devopsUser.name || devopsUser.uniqueName || '');
+		const targetDisplayName = cleanDisplayName(devopsUser.displayName || devopsUser.name || '').toLowerCase();
 
 		if (targetEmail) {
 			const byEmail = users.find(u => extractEmail(u.userName) === targetEmail);
@@ -141,7 +171,7 @@ function resolveCurrentUser(users) {
 			const byName = users.find(u => cleanDisplayName(u.userName).toLowerCase() === targetDisplayName);
 			if (byName) return byName;
 
-			// Handle masked matching by initials (e.g. "kerem kupeli" matching "k*** k***")
+			// Handle masked matching by initials
 			const targetParts = targetDisplayName.split(' ').filter(Boolean);
 			const byInitials = users.find(u => {
 				const parts = cleanDisplayName(u.userName).toLowerCase().split(' ').filter(Boolean);
@@ -164,26 +194,30 @@ async function loadAllData() {
 				new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))
 			]);
 		} catch (e) {
-			token = DEV_TOKEN;
+			token = '';
 		}
 	}
-	token = token || DEV_TOKEN;
+
 	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-	const [lbRes, txRes,itRes] = await Promise.all([
+	const [lbRes, txRes, itRes] = await Promise.all([
 		fetch(`${API_BASE}/api/leaderboard?page=1&pageSize=100`, { headers }),
 		fetch(`${API_BASE}/api/transactions?page=1&pageSize=500`, { headers }),
 		fetch(`${API_BASE}/api/currentiteration`, { headers })
 	]);
 
 	const lbData = await lbRes.json();
-
-	const itData= await itRes.json();
+	const itData = await itRes.json();
 	const txData = await txRes.json();
 
 	cachedUsers = lbData.items || [];
 	allRawTransactions = txData.items || [];
-	currentIteration= itData.iterationPath|| null;
+	currentIteration = itData.iterationPath || null;
+	const headIterEl = document.getElementById('headIterationLabel');
+	if (headIterEl) headIterEl.innerText =currentIteration;
+
+	const footerIterEl = document.getElementById('footerIterationLabel');
+	if (footerIterEl) footerIterEl.innerText = `${currentIteration} (2 Hafta)`;
 
 	document.getElementById('leaderTotalUsers').innerText = `${lbData.totalCount || cachedUsers.length} kişi`;
 
@@ -201,12 +235,12 @@ async function loadAllData() {
 
 	renderDynamicViews();
 	if (currentUser) renderRozetlerGrid(currentUser);
+	checkAdminStatus();
 }
 
 function renderDynamicViews() {
 	if (!currentUser) return;
 
-	// In scope-based server responses, cachedUsers already contains the filtered points
 	const dynamicRankedUsers = cachedUsers.map(u => ({
 		...u,
 		filteredPoints: u.points
@@ -268,10 +302,10 @@ function renderLeaderboardColumn(users, myId) {
 		`;
 	};
 
-	// 1. Render Top 3 (if you are in top 3, you get highlighted with the SEN tag here)
+	// 1. Render Top 3
 	document.getElementById('topRankersList').innerHTML = top3.map((u, i) => renderRow(u, i + 1, isUserMe(u))).join('');
 
-	// 2. Middle Section: strictly visible only when isInMiddle is true
+	// 2. Middle Section: visible only when isInMiddle is true
 	const middleSection = document.getElementById('middleRankSection');
 	const middleEl = document.getElementById('myRankRowContainer');
 	const allDots = document.querySelectorAll('.divider-dots');
@@ -286,7 +320,7 @@ function renderLeaderboardColumn(users, myId) {
 		allDots.forEach(d => { d.style.display = 'none'; });
 	}
 
-	// 3. Render Bottom 3 (if you are in bottom 3, you get highlighted with the SEN tag here)
+	// 3. Render Bottom 3
 	const bottomSection = document.getElementById('bottomRankersSection');
 	if (bottom3.length > 0) {
 		if (bottomSection) bottomSection.style.display = 'block';
@@ -302,7 +336,7 @@ function renderLeaderboardColumn(users, myId) {
 
 function renderGecmisTab() {
 	const container = document.getElementById('subtab-gecmis');
-	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter,t.iterationPath));
+	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter, t.iterationPath));
 
 	if (!filtered.length) {
 		container.innerHTML = '<p style="color:var(--muted); font-size:0.85rem; padding:10px;">Bu zaman aralığında işlem bulunmuyor.</p>';
@@ -327,7 +361,7 @@ function renderGecmisTab() {
 }
 
 function renderIstatistikTab() {
-	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter,t.iterationPath));
+	const filtered = myUserTransactions.filter(t => isTransactionInScope(t.timestamp, currentTimeFilter, t.iterationPath));
 	const totalPts = filtered.reduce((acc, t) => acc + (t.deltaPoints || 0), 0);
 	const commentCount = filtered.filter(t => t.type === 'Comment Added' && t.deltaPoints > 0).length;
 	const completedWorkPoints = filtered.filter(t => t.type === 'Completed Work Updated').reduce((acc, t) => acc + (t.deltaPoints || 0), 0);
@@ -467,16 +501,17 @@ if (window.SDK && typeof SDK.init === 'function') {
 			try {
 				devopsUser = SDK.getUser();
 			} catch (e) {
-				devopsUser = DEV_USER;
+				devopsUser = null;
 			}
 			SDK.notifyLoadSucceeded();
 			refreshAll();
 		})
 		.catch(() => {
-			devopsUser = DEV_USER;
+			devopsUser = null;
 			refreshAll();
 		});
+	checkAdminStatus();
 } else {
-	devopsUser = DEV_USER;
+	devopsUser = null;
 	refreshAll();
 }
