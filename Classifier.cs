@@ -5,7 +5,7 @@ using Microsoft.ML.Tokenizers;
 
 public class ZeroShotCommentClassifier : IDisposable
 {
-	private readonly InferenceSession _session;
+	private InferenceSession _session;
 	private readonly Tokenizer _tokenizer;
 
 	public ZeroShotCommentClassifier(string modelPath, string vocabPath)
@@ -75,7 +75,14 @@ public class ZeroShotCommentClassifier : IDisposable
 
 		return Math.Round(clampedScore * 100.0, 1);
 	}
-
+	public void Reload(string modelPath)
+	{
+		_session?.Dispose();
+		var sessionOptions = Microsoft.ML.OnnxRuntime.SessionOptions.MakeSessionOptionWithCudaProvider();
+		sessionOptions.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+		sessionOptions.AddSessionConfigEntry("session.use_env_allocators", "1");
+		_session = new InferenceSession(modelPath,sessionOptions);
+	}
 		
 	public void Dispose()
 	{

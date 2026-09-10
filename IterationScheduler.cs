@@ -49,7 +49,7 @@ public class IterationSyncBackgroundService : BackgroundService
 	{
 		try
 		{
-			var client = _httpClientFactory.CreateClient("IterationClient");
+			var client = _httpClientFactory.CreateClient("DevopsHttpClient");
 			string requestUri = "MyFirstProject/MyFirstProject%20Team/_apis/work/teamsettings/iterations?$timeframe=current&api-version=7.1-preview";
 
 			using var response = await client.GetAsync(requestUri, cancellationToken);

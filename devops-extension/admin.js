@@ -322,6 +322,45 @@ async function testCommentScore() {
 		if (btn) btn.disabled = false;
 	}
 }
+async function clearAllCaches() {
+	const btn = document.getElementById('btnClearCache');
+	const label = document.getElementById('clearCacheResult');
+	if (btn) btn.disabled = true;
+	if (label) {
+		label.style.color = 'var(--muted)';
+		label.innerText = 'Önbellek temizleniyor...';
+	}
+
+	const token = await getAuthToken();
+	const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+	try {
+		const res = await fetch(`${API_BASE}/api/admin/clear-cache`, {
+			method: 'POST',
+			headers
+		});
+		const data = await res.json();
+
+		if (res.ok) {
+			if (label) {
+				label.style.color = '#2dd4bf';
+				label.innerText = data.message || 'Önbellek temizlendi.';
+			}
+		} else {
+			if (label) {
+				label.style.color = '#f87171';
+				label.innerText = res.status === 401 ? 'Yetkisiz erişim.' : (data.message || 'Hata oluştu.');
+			}
+		}
+	} catch (e) {
+		if (label) {
+			label.style.color = '#f87171';
+			label.innerText = 'Sunucuya bağlanılamadı.';
+		}
+	} finally {
+		if (btn) btn.disabled = false;
+	}
+}
 function escapeHtml(s) {
 	return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
